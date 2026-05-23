@@ -4,6 +4,7 @@ const translateBtn = document.getElementById("translateBtn");
 const copyBtn = document.getElementById("copyBtn");
 const sourceLang = document.getElementById("sourceLang");
 const targetLang = document.getElementById("targetLang");
+const metaInfo = document.getElementById("metaInfo");
 
 
 const LANGS = [
@@ -164,6 +165,7 @@ async function translateText(text, srcLang, tgtLang) {
     "You are a professional translation engine.",
     "Translate faithfully and naturally.",
     "Output only the translated text.",
+    "If the input is already in the target language, output it unchanged.",
     `Translate the input${sourcePart} into ${tgtLang}.`,
   ].join(' ');
 
@@ -222,14 +224,18 @@ translateBtn.addEventListener("click", async () => {
 
     const tgt = targetLang.value;
 
-    // If source and target are same, no model call needed
+    // 本地快速判断：如果检测到的语言与目标语言一致，无需调用大模型
     if (src === tgt) {
       outputText.value = text;
+      metaInfo.textContent = `原文本已是${tgt}，无需翻译`;
+      translateBtn.disabled = false;
+      translateBtn.textContent = "翻译";
       return;
     }
 
     const result = await translateText(text, src, tgt);
     outputText.value = result;
+    metaInfo.textContent = `已从${src}翻译为${tgt}`;
   } catch (err) {
     outputText.value = `错误：${err.message}`;
   } finally {
