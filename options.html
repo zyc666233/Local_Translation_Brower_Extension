@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>设置</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="options-body">
+    <div class="panel options-panel">
+      <h1>插件设置</h1>
+
+      <label for="apiBaseUrl">本地模型 API Base URL</label>
+      <input id="apiBaseUrl" type="text" placeholder="http://localhost:1234/v1" />
+
+      <label for="modelName">模型名</label>
+      <input id="modelName" type="text" placeholder="qwen3.5-9b" />
+
+      <label for="defaultTargetLanguage">默认目标语言</label>
+      <select id="defaultTargetLanguage">
+        <option value="Chinese">中文</option>
+        <option value="English">English</option>
+        <option value="French">Français</option>
+        <option value="German">Deutsch</option>
+        <option value="Japanese">日本語</option>
+        <option value="Korean">한국어</option>
+        <option value="Russian">Русский</option>
+      </select>
+
+      <label for="pageTranslateTargetForChinese">检测到中文时翻译成</label>
+      <select id="pageTranslateTargetForChinese">
+        <option value="English">English</option>
+        <option value="Chinese">中文</option>
+        <option value="French">Français</option>
+        <option value="German">Deutsch</option>
+        <option value="Japanese">日本語</option>
+        <option value="Korean">한국어</option>
+        <option value="Russian">Русский</option>
+      </select>
+
+      <label for="pageTranslateTargetForNonChinese">检测到非中文时翻译成</label>
+      <select id="pageTranslateTargetForNonChinese">
+        <option value="Chinese">中文</option>
+        <option value="English">English</option>
+        <option value="French">Français</option>
+        <option value="German">Deutsch</option>
+        <option value="Japanese">日本語</option>
+        <option value="Korean">한국어</option>
+        <option value="Russian">Русский</option>
+      </select>
+
+      <div class="row">
+        <button id="saveBtn">保存</button>
+        <span id="status"></span>
+      </div>
+    </div>
+    <script src="options.js"></script>
+  </body>
+</html>
