@@ -36,17 +36,23 @@ function detectLangBetter(text) {
   if (/[\u0400-\u04FF]/.test(cleaned)) return 'Russian';
 
   const normalized = cleaned.toLowerCase();
-  // Tokenize words (keep apostrophes to catch French contractions)
-  const words = normalized.match(/[a-z\u00c0-\u024fœæß']+/gi) || [];
+  // Split common contractions like j'aime -> j aime so parts are tokenized individually
+  const pre = normalized.replace(/([a-z\u00c0-\u024f])'([a-z\u00c0-\u024f])/gi, '$1 $2');
+
+  // Tokenize words (apostrophes already handled)
+  const words = pre.match(/[a-z\u00c0-\u024fœæß]+/gi) || [];
 
   const ENG_WORDS = new Set(['the','and','is','to','of','in','a','that','it','for','on','are','with','as','be','this','by','not','or','from','at','have','has','was','were','but','an','which','you','he','she','they','we','i','me','my','your','his','her','their','do','does','did','will','can','may','should']);
-  const FR_WORDS = new Set(['le','la','les','de','du','des','un','une','et','est','en','pour','pas','que','qui','sur','avec','dans','ce','cette','ces','au','aux','comme','mais','plus','ou','si','son','ses','mon','ma','mes','ne','ni','quoi','où','donc','être','avoir','je','tu','il','elle','on','nous','vous','oui','non','bonjour','salut','merci','svp','s\'il','aujourd','aujourd\'hui','bien','très','tout','tous','toutes','parce','pourquoi','comment','quand','quel','quelle','chez','entre','après','avant','depuis','encore','toujours','jamais','pouvoir','faire','aller','dire','voir','venir','prendre','vouloir']);
+  const FR_WORDS = new Set(['le','la','les','de','du','des','un','une','et','est','en','pour','pas','que','qui','sur','avec','dans','ce','cette','ces','au','aux','comme','mais','plus','ou','si','son','ses','mon','ma','mes','ne','ni','quoi','où','donc','être','avoir','je','tu','il','elle','on','nous','vous','oui','non','bonjour','salut','merci','svp','s\'il','aujourd','aujourd\'hui','bien','très','tout','tous','toutes','parce','pourquoi','comment','quand','quel','quelle','chez','entre','après','avant','depuis','encore','toujours','jamais','pouvoir','faire','aller','dire','voir','venir','prendre','vouloir','aime','aimer','aimes','aimons','aiment','veux','veut','voudrais','veux','suis','es','sommes','êtes','sont','ai','as','a','avons','avez','ont']);
   const DE_WORDS = new Set(['der','die','das','und','ist','nicht','von','zu','mit','den','ein','eine','als','auch','für','auf','ich','du','er','sie','es','wir','ihr','in','dem','des','am','im','an','zum','zur','über','noch','mehr','sein','seine']);
 
   let scores = { English: 0, French: 0, German: 0 };
 
-  for (const wRaw of words) {
-    const w = wRaw.replace(/^'+|'+$/g, '');
+  for (const token of words) {
+    if (!token) continue;
+    // handle single-letter French contraction 'j' -> 'je'
+    if (token === 'j') { scores.French++; continue; }
+    const w = token.replace(/^'+|'+$/g, '');
     if (!w) continue;
     if (ENG_WORDS.has(w)) scores.English++;
     if (FR_WORDS.has(w)) scores.French++;
@@ -56,11 +62,14 @@ function detectLangBetter(text) {
   // Accent boosts: strong signal for French/German
   const frenchAccents = (normalized.match(/[éèêàçùâôîûëïÿœæ]/gi) || []).length;
   const germanAccents = (normalized.match(/[äöüßẞ]/gi) || []).length;
+  const apostrophes = (normalized.match(/'/g) || []).length;
   scores.French += frenchAccents * 3;
   scores.German += germanAccents * 3;
+  // apostrophes slightly favor French (French uses many contractions)
+  scores.French += apostrophes;
 
   // Direct French hints (single-word cues)
-  const frenchHints = ['bonjour','merci','svp','aujourd','s\'il','sil','salut','monsieur','madame','mademoiselle','oui','non'];
+  const frenchHints = ['bonjour','merci','svp','aujourd','s\'il','salut','monsieur','madame','mademoiselle','oui','non'];
   for (const t of frenchHints) {
     if (normalized.includes(t)) { scores.French += 5; break; }
   }
