@@ -1,0 +1,15 @@
+{
+  "name": "local_translation_brower_extension",
+  "version": "1.0.0",
+  "main": "content_script.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "cld3-asm": "^4.0.0"
+  }
+}

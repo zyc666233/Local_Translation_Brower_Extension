@@ -102,6 +102,21 @@ function detectLanguage(text) {
   return detectLangBetter(text);
 }
 
+async function detectLanguageAuto(text) {
+  if (window.detectLanguageClD3) {
+    try {
+      const r = window.detectLanguageClD3(text);
+      if (r && r.language && r.language !== 'und') {
+        const map = { en: 'English', fr: 'French', de: 'German', zh: 'Chinese', ja: 'Japanese', ko: 'Korean', ru: 'Russian' };
+        return map[r.language] || detectLangBetter(text);
+      }
+    } catch (e) {
+      console.error('cld3 detect error', e);
+    }
+  }
+  return detectLangBetter(text);
+}
+
 function populateLangSelects(defaultTarget) {
   sourceLang.innerHTML = '';
   targetLang.innerHTML = '';
@@ -153,7 +168,7 @@ async function translateText(text, srcLang, tgtLang) {
     pageTranslateTargetForNonChinese: "Chinese",
   });
 
-  const detectedLang = detectLangBetter(text);
+  const detectedLang = await detectLanguageAuto(text);
 
   // If selected source lang differs from detected, auto-switch
   if (srcLang !== 'auto' && srcLang !== detectedLang) {
@@ -209,7 +224,7 @@ translateBtn.addEventListener("click", async () => {
   translateBtn.textContent = "翻译中...";
 
   try {
-    const detectedLang = detectLangBetter(text);
+    const detectedLang = await detectLanguageAuto(text);
 
     let srcSelected = sourceLang.value;
     let src;

@@ -49,12 +49,58 @@ function walkTextNodes(root) {
   return nodes;
 }
 
-function isChineseText(text) {
+function detectSourceLanguage(text) {
   const cleaned = (text || "").trim();
-  if (!cleaned) return false;
+  if (!cleaned) return 'other';
+  
+  // Count different character types
   const chineseChars = (cleaned.match(/[\u4e00-\u9fff]/g) || []).length;
-  const letters = (cleaned.match(/[A-Za-z\u00C0-\u024F\u0400-\u04FF\u3040-\u30FF\uAC00-\uD7AF]/g) || []).length;
-  return chineseChars >= Math.max(2, letters);
+  const latinChars = (cleaned.match(/[a-zA-Z]/g) || []).length;
+  const diacriticChars = (cleaned.match(/[äöüßçéèêëàâôüüèøåñáíóú]/gi) || []).length;
+  
+  // If has Chinese characters and more Chinese than Latin, it's Chinese
+  if (chineseChars > 0 && chineseChars >= latinChars) return 'zh';
+  
+  // If has diacritics, try to identify language
+  if (diacriticChars > 0) {
+    const germanCount = (cleaned.match(/[äöüß]/gi) || []).length;
+    const frenchCount = (cleaned.match(/[çéèêëàâôûü]/gi) || []).length;
+    const spanishCount = (cleaned.match(/[ñáéíóú]/gi) || []).length;
+    
+    if (germanCount > 0) return 'de';
+    if (frenchCount >= 2) return 'fr';
+    if (spanishCount >= 2) return 'es';
+  }
+  
+  // Check for non-Latin scripts
+  const japaneseChars = (cleaned.match(/[\u3040-\u309f\u30a0-\u30ff]/g) || []).length;
+  if (japaneseChars >= 1) return 'ja';
+  
+  const koreanChars = (cleaned.match(/[\uac00-\ud7af]/g) || []).length;
+  if (koreanChars >= 1) return 'ko';
+  
+  const cyrillicChars = (cleaned.match(/[\u0400-\u04ff]/g) || []).length;
+  if (cyrillicChars >= 2) return 'ru';
+  
+  const arabicChars = (cleaned.match(/[\u0600-\u06ff]/g) || []).length;
+  if (arabicChars >= 2) return 'ar';
+  
+  // Check for German words (common German words and articles)
+  const germanWords = /\b(mich|dich|sich|lich|dein|sein|mein|liebe|schne|schlie|ihre|heißt|über|auch|noch|nur|mehr|nicht|ganz|sehr|bereits|zusammen|ich|bin|ein|eine|und|der|die|das|ist|du|er|sie|es|wir|ihr|euch|eure|unsere|unseren|sind|habe|hat|haben|wird|werde|würde)\b/i;
+  if (germanWords.test(cleaned)) return 'de';
+  
+  // Check for French words (common French articles and words)
+  const frenchWords = /\b(le|la|les|de|du|des|une|un|et|je|tu|il|elle|nous|vous|elles|ils|qu|pas|plus|dans|pour|avec|par|est|sont|avoir|au|à|mon|ma|mes|ton|ta|tes|son|sa|ses|notre|votre|leur|sur|sous|entre|aussi|après|avant|comme)\b/i;
+  if (frenchWords.test(cleaned) && !germanWords.test(cleaned)) return 'fr';
+  
+  // If it's primarily Latin characters with some Chinese, it's likely mixed text
+  if (latinChars > 0 && chineseChars > 0 && chineseChars < latinChars) {
+    // Mixed text - already checked for German above
+    return 'other';
+  }
+  
+  // Default: treat as English/other
+  return 'other';
 }
 
 async function translateSelection(text) {
@@ -323,7 +369,7 @@ function addToggleButton() {
   document.body.appendChild(btn);
 }
 
-chrome.runtime.onMessage.addListener((message) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "TRANSLATE_SELECTION") {
     translateSelection(message.text || "");
   }
@@ -334,5 +380,11 @@ chrome.runtime.onMessage.addListener((message) => {
 
   if (message?.type === "TOGGLE_TRANSLATION") {
     toggleTranslation();
+  }
+  
+  if (message?.type === "DETECT_LANGUAGE") {
+    const sourceLanguage = detectSourceLanguage(message.text || "");
+    sendResponse({ language: sourceLanguage });
+    return true;
   }
 });

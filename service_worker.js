@@ -95,6 +95,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const result = await translateText({
           text: message.text,
           settings,
+          tabId: sender.tab.id,
         });
         sendResponse({ ok: true, ...result });
       } catch (err) {
@@ -162,7 +163,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           if (!resp.ok) {
             // Fallback: translate missing segments individually
             for (const idx of missingIndices) {
-              const r = await translateText({ text: segments[idx], settings });
+              const r = await translateText({ text: segments[idx], settings, tabId: sender.tab.id });
               translations[idx] = r.translated;
             }
           } else {
@@ -173,7 +174,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             if (parts.length !== missingSegments.length) {
               // Fallback to individual if mismatch
               for (const idx of missingIndices) {
-                const r = await translateText({ text: segments[idx], settings });
+                const r = await translateText({ text: segments[idx], settings, tabId: sender.tab.id });
                 translations[idx] = r.translated;
               }
             } else {
@@ -210,23 +211,39 @@ function isChineseText(text) {
   if (!cleaned) return false;
 
   const chineseChars = (cleaned.match(/[\u4e00-\u9fff]/g) || []).length;
-  const letters = (cleaned.match(/[A-Za-z\u00C0-\u024F\u0400-\u04FF\u3040-\u30FF\uAC00-]/g) || []).length;
+  const letters = (cleaned.match(/[A-Za-z\u00C0-\u024F\u0400-\u04FF\u3040-\u30FF\uAC00-\uD7AF]/g) || []).length;
 
   if (chineseChars >= Math.max(2, letters)) return true;
   return false;
 }
 
-async function translateText({ text, settings }) {
-  const sourceIsChinese = isChineseText(text);
-  const targetLanguage = sourceIsChinese
-    ? settings.pageTranslateTargetForChinese || settings.defaultTargetLanguage || "English"
-    : settings.pageTranslateTargetForNonChinese || "Chinese";
+function detectSourceLanguageViaContent(text, tabId) {
+  // Try to detect language via content script (which has access to better detection)
+  return new Promise((resolve) => {
+    try {
+      chrome.tabs.sendMessage(tabId, { type: "DETECT_LANGUAGE", text }, (response) => {
+        if (chrome.runtime.lastError) {
+          resolve(isChineseText(text) ? 'zh' : 'other');
+        } else if (response?.language) {
+          resolve(response.language);
+        } else {
+          resolve(isChineseText(text) ? 'zh' : 'other');
+        }
+      });
+    } catch (e) {
+      resolve(isChineseText(text) ? 'zh' : 'other');
+    }
+  });
+}
+
+async function translateText({ text, settings, tabId, targetLanguage: explicitTargetLanguage }) {
+  // Use explicitly provided target language, or default from settings
+  const targetLanguage = explicitTargetLanguage || settings.defaultTargetLanguage || "Chinese";
 
   const cached = await getCachedTranslation(text, targetLanguage);
   if (cached) {
     return {
       translated: cached,
-      sourceIsChinese,
       targetLanguage,
       fromCache: true,
     };
@@ -237,7 +254,7 @@ async function translateText({ text, settings }) {
 
   const systemPrompt = [
     "You are a professional translation engine.",
-    "Translate faithfully and naturally.",
+    "Automatically detect the source language and translate it faithfully and naturally.",
     "Output only the translated text.",
     "Preserve meaning, tone, punctuation, HTML tags, placeholders, and code blocks.",
     `Translate the input into ${targetLanguage}.`,
@@ -277,7 +294,6 @@ async function translateText({ text, settings }) {
 
   return {
     translated,
-    sourceIsChinese,
     targetLanguage,
   };
 }
