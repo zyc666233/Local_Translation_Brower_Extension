@@ -4,7 +4,7 @@ const translateBtn = document.getElementById("translateBtn");
 const copyBtn = document.getElementById("copyBtn");
 const sourceLang = document.getElementById("sourceLang");
 const targetLang = document.getElementById("targetLang");
-const swapLangBtn = document.getElementById("swapLangBtn");
+
 
 const LANGS = [
   { value: 'auto', label: '自动检测' },
@@ -120,12 +120,14 @@ async function detectLanguageAuto(text) {
 function populateLangSelects(defaultTarget) {
   sourceLang.innerHTML = '';
   targetLang.innerHTML = '';
-  for (const l of LANGS) {
-    const opt1 = document.createElement('option');
-    opt1.value = l.value;
-    opt1.textContent = l.label;
-    sourceLang.appendChild(opt1);
 
+  // 原语言只保留"自动检测"
+  const autoOpt = document.createElement('option');
+  autoOpt.value = 'auto';
+  autoOpt.textContent = '自动检测';
+  sourceLang.appendChild(autoOpt);
+
+  for (const l of LANGS) {
     if (l.value !== 'auto') {
       const opt2 = document.createElement('option');
       opt2.value = l.value;
@@ -138,26 +140,7 @@ function populateLangSelects(defaultTarget) {
   targetLang.value = defaultTarget || 'English';
 }
 
-swapLangBtn.addEventListener('click', () => {
-  const a = sourceLang.value;
-  const b = targetLang.value;
-  if (a === 'auto') {
-    // source was auto
-    if (b === 'Chinese') {
-      // auto + target Chinese -> new source Chinese, new target English
-      sourceLang.value = 'Chinese';
-      targetLang.value = 'English';
-    } else {
-      // auto + target not Chinese -> new source = old target, new target default Chinese
-      sourceLang.value = b;
-      targetLang.value = 'Chinese';
-    }
-  } else {
-    // normal swap
-    sourceLang.value = b;
-    targetLang.value = a === 'auto' ? 'Chinese' : a;
-  }
-});
+
 
 async function translateText(text, srcLang, tgtLang) {
   const settings = await chrome.storage.sync.get({
