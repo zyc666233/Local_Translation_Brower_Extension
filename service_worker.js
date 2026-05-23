@@ -146,7 +146,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               { role: "system", content: systemPrompt },
               { role: "user", content: missingSegments.join(delimiter) },
             ],
-            temperature: 0.1,
+            temperature: 0,
             top_p: 0.9,
             stream: false,
           };
@@ -266,7 +266,7 @@ async function translateText({ text, settings, tabId, targetLanguage: explicitTa
       { role: "system", content: systemPrompt },
       { role: "user", content: text },
     ],
-    temperature: 0.1,
+    temperature: 0,
     top_p: 0.9,
     stream: false,
   };

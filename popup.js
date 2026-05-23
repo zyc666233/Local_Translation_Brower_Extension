@@ -18,6 +18,11 @@ const LANGS = [
   { value: 'Russian', label: 'Русский' },
 ];
 
+function langLabel(value) {
+  const found = LANGS.find(l => l.value === value);
+  return found ? found.label : value;
+}
+
 function isChineseText(text) {
   const cleaned = (text || "").trim();
   if (!cleaned) return false;
@@ -178,7 +183,7 @@ async function translateText(text, srcLang, tgtLang) {
         { role: 'system', content: prompt },
         { role: 'user', content: text },
       ],
-      temperature: 0.1,
+      temperature: 0,
       stream: false,
     }),
   });
@@ -227,7 +232,7 @@ translateBtn.addEventListener("click", async () => {
     // 本地快速判断：如果检测到的语言与目标语言一致，无需调用大模型
     if (src === tgt) {
       outputText.value = text;
-      metaInfo.textContent = `原文本已是${tgt}，无需翻译`;
+      metaInfo.textContent = `原文本已是${langLabel(tgt)}，无需翻译`;
       translateBtn.disabled = false;
       translateBtn.textContent = "翻译";
       return;
@@ -235,7 +240,7 @@ translateBtn.addEventListener("click", async () => {
 
     const result = await translateText(text, src, tgt);
     outputText.value = result;
-    metaInfo.textContent = `已从${src}翻译为${tgt}`;
+    metaInfo.textContent = `已从${langLabel(src)}翻译为${langLabel(tgt)}`;
   } catch (err) {
     outputText.value = `错误：${err.message}`;
   } finally {
