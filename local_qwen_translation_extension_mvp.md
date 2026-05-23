@@ -4,7 +4,7 @@
 - 右上角图标弹窗手动翻译
 - 右键菜单翻译选中文本
 - 右键菜单翻译当前页面非中文文本
-- 默认目标语言设置
+- 默认目标语言类型设置
 - 自动识别中文 / 非中文，并按规则路由
 - 调用本地 Qwen3.5-9B 的 OpenAI-compatible HTTP 接口
 
@@ -454,7 +454,7 @@ copyBtn.addEventListener("click", async () => {
       <label for="modelName">模型名</label>
       <input id="modelName" type="text" placeholder="qwen3.5-9b" />
 
-      <label for="defaultTargetLanguage">默认目标语言</label>
+      <label for="defaultTargetLanguage">默认目标语言类型</label>
       <select id="defaultTargetLanguage">
         <option value="English">English</option>
         <option value="Chinese">中文</option>
