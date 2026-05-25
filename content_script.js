@@ -122,8 +122,8 @@ async function translatePage() {
     chrome.storage.sync.get(
       {
         apiBaseUrl: "http://localhost:1234/v1",
-        modelName: "qwen3.5-9b",
-        defaultTargetLanguage: "English",
+        modelName: "qwen3.5-9b-uncensored-hauhaucs-aggressive",
+        defaultTargetLanguage: "Chinese",
         pageTranslateTargetForChinese: "English",
         pageTranslateTargetForNonChinese: "Chinese",
       },
@@ -131,7 +131,7 @@ async function translatePage() {
     )
   );
 
-  const targetLanguage = settings.pageTranslateTargetForNonChinese || settings.defaultTargetLanguage || "English";
+  const targetLanguage = settings.pageTranslateTargetForNonChinese || settings.defaultTargetLanguage || "Chinese";
 
   // Build chunks (merge adjacent items) using smaller chunks for faster partial responses
   const CHUNK_SIZE = 2000; // 2k chars per chunk

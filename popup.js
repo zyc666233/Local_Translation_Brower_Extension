@@ -43,7 +43,7 @@ function populateLangSelects(defaultTarget) {
   }
 
   sourceLang.value = 'auto';
-  targetLang.value = defaultTarget || 'English';
+  targetLang.value = defaultTarget || 'Chinese';
 }
 
 
@@ -51,21 +51,30 @@ function populateLangSelects(defaultTarget) {
 async function translateText(text, tgtLang) {
   const settings = await chrome.storage.sync.get({
     apiBaseUrl: "http://localhost:1234/v1",
-    modelName: "qwen3.5-9b",
-    defaultTargetLanguage: "English",
+    modelName: "qwen3.5-9b-uncensored-hauhaucs-aggressive",
+    defaultTargetLanguage: "Chinese",
   });
 
+  // ---- 本地语言检测 ----
+  const detectedLang = LangDetect.detect(text);
   const tgtLabel = langLabel(tgtLang);
 
+  // 源语言与目标语言相同，无需翻译
+  if (detectedLang && detectedLang === tgtLang) {
+    return {
+      detectedLang: LangDetect.getNativeName(detectedLang),
+      translatedText: text,
+      sameLanguage: true,
+    };
+  }
+
+  // ---- 纯翻译 prompt（不含语言检测） ----
   const prompt = [
     "You are a professional translation engine.",
-    "First, detect the source language of the input.",
-    `If the source language is the same as the target language (${tgtLabel}), copy the input unchanged as the translation.`,
-    "Output ONLY a valid JSON object (no markdown, no extra text) with exactly these three fields:",
-    `"sourceLanguage": the source language name in its own native form (must be one of: English, 中文, Français, Deutsch, 日本語, 한국어, Русский)`,
-    `"translation": the translated text (or original if source equals target)`,
-    `"sameLanguage": true if source language equals ${tgtLabel}, false otherwise`,
-  ].join('\n');
+    `Translate the following text into ${tgtLabel}.`,
+    "Translate faithfully and naturally. Preserve meaning, tone, punctuation, formatting, HTML tags, and placeholders.",
+    "Output ONLY the translated text, no extra commentary.",
+  ].join("\n");
 
   const resp = await fetch(`${settings.apiBaseUrl.replace(/\/$/, '')}/chat/completions`, {
     method: 'POST',
@@ -86,28 +95,17 @@ async function translateText(text, tgtLang) {
   }
 
   const data = await resp.json();
-  const raw = data?.choices?.[0]?.message?.content?.trim() || '';
+  const translated = data?.choices?.[0]?.message?.content?.trim() || text;
 
-  // Parse JSON from response, handling possible markdown code blocks
-  let jsonStr = raw;
-  const jsonMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (jsonMatch) jsonStr = jsonMatch[1].trim();
-
-  try {
-    const parsed = JSON.parse(jsonStr);
-    return {
-      detectedLang: parsed.sourceLanguage || '',
-      translatedText: parsed.translation || text,
-      sameLanguage: !!parsed.sameLanguage,
-    };
-  } catch {
-    // Fallback: if JSON parsing fails, treat entire response as translation
-    return { detectedLang: '', translatedText: raw, sameLanguage: false };
-  }
+  return {
+    detectedLang: detectedLang ? LangDetect.getNativeName(detectedLang) : '',
+    translatedText: translated,
+    sameLanguage: false,
+  };
 }
 
 async function init() {
-  const settings = await new Promise((res) => chrome.storage.sync.get({ defaultTargetLanguage: 'English' }, res));
+  const settings = await new Promise((res) => chrome.storage.sync.get({ defaultTargetLanguage: 'Chinese' }, res));
   populateLangSelects(settings.defaultTargetLanguage);
 }
 

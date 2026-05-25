@@ -1,7 +1,9 @@
+importScripts("lang_detect.js");
+
 const DEFAULT_SETTINGS = {
   apiBaseUrl: "http://localhost:1234/v1",
-  modelName: "qwen3.5-9b",
-  defaultTargetLanguage: "English",
+  modelName: "qwen3.5-9b-uncensored-hauhaucs-aggressive",
+  defaultTargetLanguage: "Chinese",
   autoTranslatePage: true,
   pageTranslateTargetForChinese: "English",
   pageTranslateTargetForNonChinese: "Chinese",
@@ -51,7 +53,7 @@ async function setCachedTranslation(text, targetLanguage, translated) {
 
 chrome.runtime.onInstalled.addListener(async () => {
   const current = await chrome.storage.sync.get(DEFAULT_SETTINGS);
-  await chrome.storage.sync.set({ ...DEFAULT_SETTINGS, ...current });
+  await chrome.storage.sync.set({ ...current, ...DEFAULT_SETTINGS });
 
   chrome.contextMenus.create({
     id: "translate-selection",
@@ -112,7 +114,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       try {
         const settings = await chrome.storage.sync.get(DEFAULT_SETTINGS);
         const segments = Array.isArray(message.segments) ? message.segments : [];
-        const targetLanguage = message.targetLanguage || (settings.pageTranslateTargetForNonChinese || settings.defaultTargetLanguage || "English");
+        const targetLanguage = message.targetLanguage || (settings.pageTranslateTargetForNonChinese || settings.defaultTargetLanguage || "Chinese");
 
         const translations = new Array(segments.length);
         const missingIndices = [];
@@ -137,7 +139,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             "Translate faithfully and naturally.",
             `Output only the translated segments separated by the exact token ${delimiter} with no extra text. Do NOT modify the delimiter.`,
             "Preserve meaning, tone, punctuation, HTML tags, placeholders, and code blocks.",
-            `Translate the input into ${targetLanguage}.`,
+            `Translate each segment into ${targetLanguage}.`,
           ].join(" ");
 
           const body = {
@@ -224,8 +226,8 @@ async function translateText({ text, settings, tabId, targetLanguage: explicitTa
 
   const systemPrompt = [
     "You are a professional translation engine.",
-    "Automatically detect the source language and translate it faithfully and naturally.",
-    "Output only the translated text.",
+    "Translate faithfully and naturally.",
+    "Output only the translated text, no extra commentary.",
     "Preserve meaning, tone, punctuation, HTML tags, placeholders, and code blocks.",
     `Translate the input into ${targetLanguage}.`,
   ].join(" ");
