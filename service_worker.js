@@ -5,8 +5,6 @@ const DEFAULT_SETTINGS = {
   modelName: "qwen3.5-9b-uncensored-hauhaucs-aggressive",
   defaultTargetLanguage: "Chinese",
   autoTranslatePage: true,
-  pageTranslateTargetForChinese: "English",
-  pageTranslateTargetForNonChinese: "Chinese",
 };
 
 let translationCache = {};
@@ -114,7 +112,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       try {
         const settings = await chrome.storage.sync.get(DEFAULT_SETTINGS);
         const segments = Array.isArray(message.segments) ? message.segments : [];
-        const targetLanguage = message.targetLanguage || (settings.pageTranslateTargetForNonChinese || settings.defaultTargetLanguage || "Chinese");
+        const targetLanguage = message.targetLanguage || settings.defaultTargetLanguage || "Chinese";
 
         const translations = new Array(segments.length);
         const missingIndices = [];

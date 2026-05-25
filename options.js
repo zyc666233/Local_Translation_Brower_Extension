@@ -2,8 +2,6 @@ const fields = {
   apiBaseUrl: document.getElementById("apiBaseUrl"),
   modelName: document.getElementById("modelName"),
   defaultTargetLanguage: document.getElementById("defaultTargetLanguage"),
-  pageTranslateTargetForChinese: document.getElementById("pageTranslateTargetForChinese"),
-  pageTranslateTargetForNonChinese: document.getElementById("pageTranslateTargetForNonChinese"),
 };
 
 const saveBtn = document.getElementById("saveBtn");
@@ -14,15 +12,11 @@ async function loadSettings() {
     apiBaseUrl: "http://localhost:1234/v1",
     modelName: "qwen3.5-9b-uncensored-hauhaucs-aggressive",
     defaultTargetLanguage: "Chinese",
-    pageTranslateTargetForChinese: "English",
-    pageTranslateTargetForNonChinese: "Chinese",
   });
 
   fields.apiBaseUrl.value = data.apiBaseUrl;
   fields.modelName.value = data.modelName;
   fields.defaultTargetLanguage.value = data.defaultTargetLanguage;
-  fields.pageTranslateTargetForChinese.value = data.pageTranslateTargetForChinese;
-  fields.pageTranslateTargetForNonChinese.value = data.pageTranslateTargetForNonChinese;
 }
 
 async function saveSettings() {
@@ -30,8 +24,6 @@ async function saveSettings() {
     apiBaseUrl: fields.apiBaseUrl.value.trim(),
     modelName: fields.modelName.value.trim(),
     defaultTargetLanguage: fields.defaultTargetLanguage.value,
-    pageTranslateTargetForChinese: fields.pageTranslateTargetForChinese.value,
-    pageTranslateTargetForNonChinese: fields.pageTranslateTargetForNonChinese.value,
   });
 
   status.textContent = "已保存";
