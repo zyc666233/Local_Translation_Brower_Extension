@@ -16,7 +16,7 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["pure_content_script.js"],
+      "js": ["content_script.js"],
       "run_at": "document_end"
     }
   ]
