@@ -72,64 +72,130 @@ async function translateSelection(text) {
   const range = _savedSelectionRange;
   _savedSelectionRange = null;
 
-  if (range && range.startContainer && range.endContainer) {
-    try {
-      // 保存原始 DOM 结构（含超链接、加粗等）
-      const originalFragment = range.cloneContents();
+  if (!range || !range.startContainer || !range.endContainer) {
+    alert(translated.translated);
+    return;
+  }
 
-      const id = "sel-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6);
-      const span = document.createElement("span");
-      span.className = "loc-trans-sel";
-      span.dataset.transId = id;
-      span.textContent = translated.translated;
-      span.title = "原文: " + text;
-      span.style.cssText =
-        "border-bottom:2px dotted #1f6feb;cursor:pointer;transition:background .2s;";
+  try {
+    const id = "sel-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6);
 
-      span.addEventListener("mouseenter", () => {
-        span.style.background = "rgba(31,111,235,0.1)";
-      });
-      span.addEventListener("mouseleave", () => {
-        span.style.background = "";
-      });
-      span.addEventListener("click", (e) => {
-        e.stopPropagation();
-        toggleSelectionTranslation(id);
-      });
+    // ---- 情况1：选区完全在单个文本节点内（最常见，如超链接内文字） ----
+    if (range.startContainer === range.endContainer && range.startContainer.nodeType === Node.TEXT_NODE) {
+      const textNode = range.startContainer;
+      const parentEl = textNode.parentElement;
+      const original = range.toString();
 
-      range.deleteContents();
-      range.insertNode(span);
+      const span = createTransSpan(id, translated.translated, parentEl);
+      span.title = "原文: " + original;
+
+      // surroundContents 由浏览器处理拆分与包裹，不破坏 DOM 层级
+      range.surroundContents(span);
 
       _selectionTranslations.set(id, {
-        originalFragment,
+        mode: "textNode",
+        originalText: original,
         translated: translated.translated,
         spanEl: span,
       });
       return;
-    } catch (err) {
-      console.warn("选区替换失败，回退到弹窗:", err);
     }
-  }
 
-  // 回退：弹窗显示（选区已失效时）
-  alert(translated.translated);
+    // ---- 情况2：选区跨多个元素（回退方案） ----
+    const originalFragment = range.cloneContents();
+    const parentEl = range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
+      ? range.commonAncestorContainer
+      : range.commonAncestorContainer.parentElement;
+
+    const span = createTransSpan(id, translated.translated, parentEl);
+    span.title = "原文: " + text;
+
+    range.deleteContents();
+    range.insertNode(span);
+
+    _selectionTranslations.set(id, {
+      mode: "fragment",
+      originalFragment,
+      translated: translated.translated,
+      spanEl: span,
+    });
+  } catch (err) {
+    console.warn("选区替换失败，回退到弹窗:", err);
+    alert(translated.translated);
+  }
+}
+
+function createTransSpan(id, text, parentEl) {
+  const span = document.createElement("span");
+  span.className = "loc-trans-sel";
+  span.dataset.transId = id;
+  span.textContent = text;
+  // 显式复制父元素关键样式，确保即使 DOM 位置变化也不丢失视觉效果
+  if (parentEl) {
+    copyKeyStyles(parentEl, span);
+  }
+  span.style.borderBottom = "2px dotted #1f6feb";
+  span.style.cursor = "pointer";
+  span.style.transition = "background .2s";
+
+  span.addEventListener("mouseenter", () => {
+    span.style.setProperty("background", "rgba(31,111,235,0.1)", "important");
+  });
+  span.addEventListener("mouseleave", () => {
+    span.style.setProperty("background", "", "important");
+  });
+  span.addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleSelectionTranslation(id);
+  });
+  return span;
+}
+
+function copyKeyStyles(sourceEl, targetSpan) {
+  const computed = getComputedStyle(sourceEl);
+  const props = [
+    "color", "font-family", "font-size", "font-weight", "font-style",
+    "line-height", "letter-spacing", "word-spacing", "text-align",
+    "text-decoration", "text-transform", "white-space", "vertical-align",
+  ];
+  for (const prop of props) {
+    const val = computed.getPropertyValue(prop);
+    if (val) targetSpan.style.setProperty(prop, val);
+  }
 }
 
 function toggleSelectionTranslation(id) {
   const entry = _selectionTranslations.get(id);
   if (!entry || !entry.spanEl) return;
-  const { originalFragment, translated, spanEl } = entry;
+  const { spanEl } = entry;
 
+  if (entry.mode === "textNode") {
+    // 文本节点模式：span 在原父元素内，直接交换文字即可
+    const { originalText, translated } = entry;
+    const isShowingOriginal = spanEl.textContent === originalText;
+
+    if (isShowingOriginal) {
+      spanEl.textContent = translated;
+      spanEl.style.borderBottom = "2px dotted #1f6feb";
+      spanEl.title = "原文: " + originalText;
+    } else {
+      spanEl.textContent = originalText;
+      spanEl.style.borderBottom = "none";
+      spanEl.title = "译文: " + translated;
+    }
+    return;
+  }
+
+  // 跨元素片段模式
+  const { originalFragment, translated } = entry;
   const isShowingOriginal = !spanEl.style.borderBottom.includes("dotted");
 
   if (isShowingOriginal) {
-    // 切回译文
     spanEl.replaceChildren();
     spanEl.textContent = translated;
     spanEl.style.borderBottom = "2px dotted #1f6feb";
     spanEl.title = "原文: " + originalFragment.textContent;
   } else {
-    // 切回原文（保留原始 DOM 结构：超链接、加粗等）
     spanEl.replaceChildren(originalFragment.cloneNode(true));
     spanEl.style.borderBottom = "none";
     spanEl.title = "译文: " + translated;
