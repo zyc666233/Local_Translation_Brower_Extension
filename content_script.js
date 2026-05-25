@@ -4,6 +4,20 @@ let pageState = {
   showingOriginal: false,
 };
 
+// ---- 选中文本翻译状态 ----
+let _savedSelectionRange = null;          // 右键时保存的选区
+let _selectionTranslations = new Map();  // id -> { originalText, translated, spanEl }
+
+// ---- 右键时捕获选区 ----
+document.addEventListener("contextmenu", () => {
+  const sel = window.getSelection();
+  if (sel && sel.rangeCount > 0 && sel.toString().trim()) {
+    _savedSelectionRange = sel.getRangeAt(0).cloneRange();
+  } else {
+    _savedSelectionRange = null;
+  }
+});
+
 function sendTranslateRequest(text) {
   return new Promise((resolve, reject) => {
     chrome.runtime.sendMessage(
@@ -51,8 +65,75 @@ function walkTextNodes(root) {
 
 async function translateSelection(text) {
   if (!text || !text.trim()) return;
+
   const translated = await sendTranslateRequest(text);
+
+  // 尝试用保存的选区范围原地替换
+  const range = _savedSelectionRange;
+  _savedSelectionRange = null;
+
+  if (range && range.startContainer && range.endContainer) {
+    try {
+      // 保存原始 DOM 结构（含超链接、加粗等）
+      const originalFragment = range.cloneContents();
+
+      const id = "sel-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6);
+      const span = document.createElement("span");
+      span.className = "loc-trans-sel";
+      span.dataset.transId = id;
+      span.textContent = translated.translated;
+      span.title = "原文: " + text;
+      span.style.cssText =
+        "border-bottom:2px dotted #1f6feb;cursor:pointer;transition:background .2s;";
+
+      span.addEventListener("mouseenter", () => {
+        span.style.background = "rgba(31,111,235,0.1)";
+      });
+      span.addEventListener("mouseleave", () => {
+        span.style.background = "";
+      });
+      span.addEventListener("click", (e) => {
+        e.stopPropagation();
+        toggleSelectionTranslation(id);
+      });
+
+      range.deleteContents();
+      range.insertNode(span);
+
+      _selectionTranslations.set(id, {
+        originalFragment,
+        translated: translated.translated,
+        spanEl: span,
+      });
+      return;
+    } catch (err) {
+      console.warn("选区替换失败，回退到弹窗:", err);
+    }
+  }
+
+  // 回退：弹窗显示（选区已失效时）
   alert(translated.translated);
+}
+
+function toggleSelectionTranslation(id) {
+  const entry = _selectionTranslations.get(id);
+  if (!entry || !entry.spanEl) return;
+  const { originalFragment, translated, spanEl } = entry;
+
+  const isShowingOriginal = !spanEl.style.borderBottom.includes("dotted");
+
+  if (isShowingOriginal) {
+    // 切回译文
+    spanEl.replaceChildren();
+    spanEl.textContent = translated;
+    spanEl.style.borderBottom = "2px dotted #1f6feb";
+    spanEl.title = "原文: " + originalFragment.textContent;
+  } else {
+    // 切回原文（保留原始 DOM 结构：超链接、加粗等）
+    spanEl.replaceChildren(originalFragment.cloneNode(true));
+    spanEl.style.borderBottom = "none";
+    spanEl.title = "译文: " + translated;
+  }
 }
 
 function toggleTranslation() {
