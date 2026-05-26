@@ -1,32 +1,22 @@
 /**
  * content_scripts
  * 功能：
- * 1. 鼠标选中一段文本后，按文本节点拆分
- * 2. 逐段调用后台翻译服务，翻译为中文
- * 3. 仅替换选区内的文本内容，不修改标签结构和属性
+ * 1. 仅响应右键菜单触发的翻译消息
+ * 2. 按选区拆分为多个文本节点片段
+ * 3. 先过滤纯数字/纯符号片段
+ * 4. 将需要翻译的片段调用后台模型服务翻译为中文
+ * 5. 仅替换原位置的文本内容，不修改标签结构和属性
  *
  * 依赖：
  * - background/service worker 中已实现 TRANSLATE_TEXT 消息处理
+ * - 右键菜单点击后，background 会发送 TRANSLATE_SELECTION 到当前标签页
  */
 
 const TRANSLATE_TARGET_LANGUAGE = "Chinese";
 let isTranslatingSelection = false;
 
 /**
- * 鼠标松开后自动处理当前选区
- * 如果你只想通过右键菜单触发，可以删掉这个监听器
- */
-document.addEventListener("mouseup", () => {
-  setTimeout(() => {
-    translateCurrentSelectionInPlace().catch((err) => {
-      console.error("翻译选区失败:", err);
-    });
-  }, 0);
-});
-
-/**
- * 可选：支持来自 background 的主动触发
- * 例如右键菜单点击后，background 发消息给 content script
+ * 仅响应来自 background 的右键菜单触发消息
  */
 chrome.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
   if (!message?.type) return false;
@@ -79,16 +69,18 @@ async function translateCurrentSelectionInPlace() {
   isTranslatingSelection = true;
 
   try {
-    // 先对同样的文本去重，避免重复请求
-    const uniqueTexts = [...new Set(
-      segments
-        .map((s) => s.selectedPart)
-        .filter((text) => typeof text === "string" && text.trim())
-    )];
+    // 先筛出需要翻译的片段，并去重，避免重复请求模型
+    const translatableTexts = [
+      ...new Set(
+        segments
+          .map((s) => s.selectedPart)
+          .filter((text) => shouldTranslateText(text))
+      ),
+    ];
 
     const translatedMap = new Map();
 
-    for (const text of uniqueTexts) {
+    for (const text of translatableTexts) {
       const translated = await translateTextViaBackground(text);
       translatedMap.set(text, translated);
     }
@@ -98,6 +90,20 @@ async function translateCurrentSelectionInPlace() {
     for (const segment of segments) {
       const { textNode, start, end, selectedPart, parentEl } = segment;
       const originalText = textNode.nodeValue || "";
+
+      // 纯数字/纯符号：不翻译，直接保留原文
+      if (!shouldTranslateText(selectedPart)) {
+        changedSegments.push({
+          originalText: selectedPart,
+          translatedText: selectedPart,
+          skipped: true,
+          reason: "pure_number_or_symbol",
+          tag: parentEl ? parentEl.tagName.toLowerCase() : null,
+          href: getAnchorHref(parentEl),
+          path: parentEl ? buildDomPath(parentEl) : null,
+        });
+        continue;
+      }
 
       const translated = translatedMap.get(selectedPart);
       if (typeof translated !== "string" || !translated.length) {
@@ -112,6 +118,7 @@ async function translateCurrentSelectionInPlace() {
       changedSegments.push({
         originalText: selectedPart,
         translatedText: translated,
+        skipped: false,
         tag: parentEl ? parentEl.tagName.toLowerCase() : null,
         href: getAnchorHref(parentEl),
         path: parentEl ? buildDomPath(parentEl) : null,
@@ -127,6 +134,41 @@ async function translateCurrentSelectionInPlace() {
   } finally {
     isTranslatingSelection = false;
   }
+}
+
+/**
+ * 判断文本是否需要翻译
+ * 规则：
+ * - 空白不翻译
+ * - 纯数字不翻译
+ * - 纯符号不翻译
+ *
+ * 说明：
+ * 这里采用较保守的判断方式，只跳过明显不需要翻译的片段。
+ * 比如 "123"、"！！"、"—"、"%%%" 会被跳过；
+ * 像 "3.14"、"2026-05-26" 这类带分隔符的内容，仍会进入翻译流程。
+ */
+function shouldTranslateText(text) {
+  if (typeof text !== "string") return false;
+
+  const compact = text.trim();
+  if (!compact) return false;
+
+  // 去掉空白后再判断，避免 "   123   "、" ！！ " 这种情况
+  const stripped = compact.replace(/\s+/g, "");
+  if (!stripped) return false;
+
+  // 纯数字
+  if (/^[\p{N}]+$/u.test(stripped)) {
+    return false;
+  }
+
+  // 纯符号 / 标点
+  if (/^[\p{P}\p{S}]+$/u.test(stripped)) {
+    return false;
+  }
+
+  return true;
 }
 
 /**
