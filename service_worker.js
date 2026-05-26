@@ -1,24 +1,22 @@
-importScripts("lang_detect.js");
-
 const DEFAULT_SETTINGS = {
   apiBaseUrl: "http://localhost:1234/v1",
   modelName: "qwen3.5-9b-uncensored-hauhaucs-aggressive",
   defaultTargetLanguage: "Chinese",
-  autoTranslatePage: true,
 };
 
-let translationCache = {};
-
 function initDB() {
-  return new Promise((resolve) => {
-    const req = indexedDB.open('TranslationCache', 1);
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open("TranslationCache", 1);
+
     req.onupgradeneeded = (e) => {
       const db = e.target.result;
-      if (!db.objectStoreNames.contains('translations')) {
-        db.createObjectStore('translations', { keyPath: 'key' });
+      if (!db.objectStoreNames.contains("translations")) {
+        db.createObjectStore("translations", { keyPath: "key" });
       }
     };
+
     req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
   });
 }
 
@@ -26,11 +24,14 @@ async function getCachedTranslation(text, targetLanguage) {
   try {
     const key = `${text}|${targetLanguage}`;
     const db = await initDB();
-    return new Promise((resolve) => {
-      const tx = db.transaction('translations', 'readonly');
-      const store = tx.objectStore('translations');
+
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction("translations", "readonly");
+      const store = tx.objectStore("translations");
       const req = store.get(key);
-      req.onsuccess = () => resolve(req.result?.translated);
+
+      req.onsuccess = () => resolve(req.result?.translated || null);
+      req.onerror = () => reject(req.error);
     });
   } catch {
     return null;
@@ -41,17 +42,46 @@ async function setCachedTranslation(text, targetLanguage, translated) {
   try {
     const key = `${text}|${targetLanguage}`;
     const db = await initDB();
-    const tx = db.transaction('translations', 'readwrite');
-    const store = tx.objectStore('translations');
-    store.put({ key, text, targetLanguage, translated, timestamp: Date.now() });
+
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction("translations", "readwrite");
+      const store = tx.objectStore("translations");
+      const req = store.put({
+        key,
+        text,
+        targetLanguage,
+        translated,
+        timestamp: Date.now(),
+      });
+
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    });
   } catch (err) {
-    console.warn('Cache write error:', err);
+    console.warn("Cache write error:", err);
   }
 }
 
-chrome.runtime.onInstalled.addListener(async () => {
+async function loadSettings() {
   const current = await chrome.storage.sync.get(DEFAULT_SETTINGS);
-  await chrome.storage.sync.set({ ...current, ...DEFAULT_SETTINGS });
+  return {
+    ...DEFAULT_SETTINGS,
+    ...current,
+  };
+}
+
+async function ensureDefaultSettings() {
+  const current = await chrome.storage.sync.get(DEFAULT_SETTINGS);
+  await chrome.storage.sync.set({
+    ...current,
+    ...DEFAULT_SETTINGS,
+  });
+}
+
+async function createContextMenus() {
+  await new Promise((resolve) => {
+    chrome.contextMenus.removeAll(() => resolve());
+  });
 
   chrome.contextMenus.create({
     id: "translate-selection",
@@ -64,6 +94,15 @@ chrome.runtime.onInstalled.addListener(async () => {
     title: "翻译当前页面",
     contexts: ["page"],
   });
+}
+
+chrome.runtime.onInstalled.addListener(async () => {
+  try {
+    await ensureDefaultSettings();
+    await createContextMenus();
+  } catch (err) {
+    console.error("Initialization failed:", err);
+  }
 });
 
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
@@ -85,118 +124,24 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (!message?.type) return;
+  if (!message?.type) return false;
 
-  // Single-text translation (legacy)
   if (message.type === "TRANSLATE_TEXT") {
     (async () => {
       try {
-        const settings = await chrome.storage.sync.get(DEFAULT_SETTINGS);
+        const settings = await loadSettings();
         const result = await translateText({
           text: message.text,
           settings,
-          tabId: sender.tab.id,
+          targetLanguage: message.targetLanguage,
         });
+
         sendResponse({ ok: true, ...result });
       } catch (err) {
-        sendResponse({ ok: false, error: err?.message || String(err) });
-      }
-    })();
-
-    return true;
-  }
-
-  // Batch translation: segments array -> returns translations array (same order)
-  if (message.type === "TRANSLATE_BATCH") {
-    (async () => {
-      try {
-        const settings = await chrome.storage.sync.get(DEFAULT_SETTINGS);
-        const segments = Array.isArray(message.segments) ? message.segments : [];
-        const targetLanguage = message.targetLanguage || settings.defaultTargetLanguage || "Chinese";
-
-        const translations = new Array(segments.length);
-        const missingIndices = [];
-
-        // Check cache for each segment
-        for (let i = 0; i < segments.length; i++) {
-          const seg = segments[i];
-          const cached = await getCachedTranslation(seg, targetLanguage);
-          if (cached) {
-            translations[i] = cached;
-          } else {
-            missingIndices.push(i);
-          }
-        }
-
-        if (missingIndices.length > 0) {
-          const missingSegments = missingIndices.map((i) => segments[i]);
-          const delimiter = '<<<TX_BOUNDARY_123456>>>';
-
-          const systemPrompt = [
-            "You are a professional translation engine.",
-            "Translate faithfully and naturally.",
-            `Output only the translated segments separated by the exact token ${delimiter} with no extra text. Do NOT modify the delimiter.`,
-            "Preserve meaning, tone, punctuation, HTML tags, placeholders, and code blocks.",
-            `Translate each segment into ${targetLanguage}.`,
-          ].join(" ");
-
-          const body = {
-            model: settings.modelName,
-            messages: [
-              { role: "system", content: systemPrompt },
-              { role: "user", content: missingSegments.join(delimiter) },
-            ],
-            temperature: 0,
-            top_p: 0.9,
-            stream: false,
-          };
-
-          const apiBaseUrl = settings.apiBaseUrl.replace(/\/$/, "");
-          const resp = await fetch(`${apiBaseUrl}/chat/completions`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify(body),
-          });
-
-          if (!resp.ok) {
-            // Fallback: translate missing segments individually
-            for (const idx of missingIndices) {
-              const r = await translateText({ text: segments[idx], settings, tabId: sender.tab.id });
-              translations[idx] = r.translated;
-            }
-          } else {
-            const data = await resp.json();
-            const combined = data?.choices?.[0]?.message?.content || "";
-            const parts = combined.split(delimiter).map((s) => s.trim());
-
-            if (parts.length !== missingSegments.length) {
-              // Fallback to individual if mismatch
-              for (const idx of missingIndices) {
-                const r = await translateText({ text: segments[idx], settings, tabId: sender.tab.id });
-                translations[idx] = r.translated;
-              }
-            } else {
-              for (let k = 0; k < missingIndices.length; k++) {
-                const originalIndex = missingIndices[k];
-                const tr = parts[k];
-                translations[originalIndex] = tr;
-                // Cache per-segment
-                await setCachedTranslation(segments[originalIndex], targetLanguage, tr);
-              }
-            }
-          }
-        }
-
-        // Fill any remaining undefined translations with original text
-        for (let i = 0; i < translations.length; i++) {
-          if (translations[i] === undefined) translations[i] = segments[i];
-        }
-
-        sendResponse({ ok: true, translations });
-      } catch (err) {
-        sendResponse({ ok: false, error: err?.message || String(err) });
+        sendResponse({
+          ok: false,
+          error: err?.message || String(err),
+        });
       }
     })();
 
@@ -206,11 +151,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return false;
 });
 
-async function translateText({ text, settings, tabId, targetLanguage: explicitTargetLanguage }) {
-  // Use explicitly provided target language, or default from settings
-  const targetLanguage = explicitTargetLanguage || settings.defaultTargetLanguage || "Chinese";
+async function translateText({ text, settings, targetLanguage: explicitTargetLanguage }) {
+  const input = typeof text === "string" ? text : String(text ?? "");
+  if (!input.trim()) {
+    throw new Error("待翻译文本为空");
+  }
 
-  const cached = await getCachedTranslation(text, targetLanguage);
+  const targetLanguage =
+    explicitTargetLanguage || settings.defaultTargetLanguage || "Chinese";
+
+  const cached = await getCachedTranslation(input, targetLanguage);
   if (cached) {
     return {
       translated: cached,
@@ -223,18 +173,17 @@ async function translateText({ text, settings, tabId, targetLanguage: explicitTa
   const modelName = settings.modelName;
 
   const systemPrompt = [
-    "You are a professional translation engine.",
-    "Translate faithfully and naturally.",
-    "Output only the translated text, no extra commentary.",
-    "Preserve meaning, tone, punctuation, HTML tags, placeholders, and code blocks.",
-    `Translate the input into ${targetLanguage}.`,
+    "你是一个专业翻译引擎。",
+    "请忠实、自然地将用户输入的文本翻译成目标语言。",
+    "只输出翻译结果，不要添加任何解释、注释、前缀或后缀。",
+    `请将输入文本翻译为${targetLanguage}。`,
   ].join(" ");
 
   const body = {
     model: modelName,
     messages: [
       { role: "system", content: systemPrompt },
-      { role: "user", content: text },
+      { role: "user", content: input },
     ],
     temperature: 0,
     top_p: 0.9,
@@ -256,11 +205,12 @@ async function translateText({ text, settings, tabId, targetLanguage: explicitTa
 
   const data = await resp.json();
   const translated = data?.choices?.[0]?.message?.content?.trim();
+
   if (!translated) {
     throw new Error("模型返回为空");
   }
 
-  await setCachedTranslation(text, targetLanguage, translated);
+  await setCachedTranslation(input, targetLanguage, translated);
 
   return {
     translated,
