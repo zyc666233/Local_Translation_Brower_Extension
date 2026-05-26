@@ -3,21 +3,15 @@
  * 功能：
  * 1. 仅响应右键菜单触发的翻译消息
  * 2. 按选区拆分为多个文本节点片段
- * 3. 先过滤纯数字/纯符号片段
- * 4. 将需要翻译的片段调用后台模型服务翻译为中文
- * 5. 仅替换原位置的文本内容，不修改标签结构和属性
- *
- * 依赖：
- * - background/service worker 中已实现 TRANSLATE_TEXT 消息处理
- * - 右键菜单点击后，background 会发送 TRANSLATE_SELECTION 到当前标签页
+ * 3. 跳过：纯数字、日期、URL、邮箱、纯标点/符号等无需翻译内容
+ * 4. 逐段调用后台模型服务翻译为中文
+ * 5. 每返回一个翻译结果，就立即替换对应文本，实现逐步替换效果
+ * 6. 仅替换原位置的文本内容，不修改标签结构和属性
  */
 
 const TRANSLATE_TARGET_LANGUAGE = "Chinese";
 let isTranslatingSelection = false;
 
-/**
- * 仅响应来自 background 的右键菜单触发消息
- */
 chrome.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
   if (!message?.type) return false;
 
@@ -30,6 +24,7 @@ chrome.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           changedSegments,
         });
       } catch (err) {
+        console.error("翻译选区失败:", err);
         sendResponse({
           ok: false,
           error: err?.message || String(err),
@@ -43,9 +38,6 @@ chrome.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
   return false;
 });
 
-/**
- * 翻译当前选区，并将翻译结果原位写回 DOM
- */
 async function translateCurrentSelectionInPlace() {
   if (isTranslatingSelection) return null;
 
@@ -69,35 +61,20 @@ async function translateCurrentSelectionInPlace() {
   isTranslatingSelection = true;
 
   try {
-    // 先筛出需要翻译的片段，并去重，避免重复请求模型
-    const translatableTexts = [
-      ...new Set(
-        segments
-          .map((s) => s.selectedPart)
-          .filter((text) => shouldTranslateText(text))
-      ),
-    ];
-
-    const translatedMap = new Map();
-
-    for (const text of translatableTexts) {
-      const translated = await translateTextViaBackground(text);
-      translatedMap.set(text, translated);
-    }
-
     const changedSegments = [];
+    const translatedTextCache = new Map();
 
     for (const segment of segments) {
       const { textNode, start, end, selectedPart, parentEl } = segment;
       const originalText = textNode.nodeValue || "";
 
-      // 纯数字/纯符号：不翻译，直接保留原文
+      // 跳过不需要翻译的片段
       if (!shouldTranslateText(selectedPart)) {
         changedSegments.push({
           originalText: selectedPart,
           translatedText: selectedPart,
           skipped: true,
-          reason: "pure_number_or_symbol",
+          reason: getSkipReason(selectedPart),
           tag: parentEl ? parentEl.tagName.toLowerCase() : null,
           href: getAnchorHref(parentEl),
           path: parentEl ? buildDomPath(parentEl) : null,
@@ -105,7 +82,14 @@ async function translateCurrentSelectionInPlace() {
         continue;
       }
 
-      const translated = translatedMap.get(selectedPart);
+      // 同一段文本如果后面再次出现，直接复用结果
+      let translated = translatedTextCache.get(selectedPart);
+
+      if (typeof translated !== "string") {
+        translated = await translateTextViaBackground(selectedPart);
+        translatedTextCache.set(selectedPart, translated);
+      }
+
       if (typeof translated !== "string" || !translated.length) {
         continue;
       }
@@ -123,30 +107,35 @@ async function translateCurrentSelectionInPlace() {
         href: getAnchorHref(parentEl),
         path: parentEl ? buildDomPath(parentEl) : null,
       });
+
+      // 让浏览器有机会先绘制，再处理下一段，视觉上更像“逐步替换”
+      await nextFrame();
     }
 
-    // 清除选区，避免页面上还残留蓝色高亮
     sel.removeAllRanges();
 
     console.log("已翻译并替换选区:", changedSegments);
-
     return changedSegments;
   } finally {
     isTranslatingSelection = false;
   }
 }
 
+function nextFrame() {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => resolve());
+  });
+}
+
 /**
  * 判断文本是否需要翻译
- * 规则：
- * - 空白不翻译
- * - 纯数字不翻译
- * - 纯符号不翻译
- *
- * 说明：
- * 这里采用较保守的判断方式，只跳过明显不需要翻译的片段。
- * 比如 "123"、"！！"、"—"、"%%%" 会被跳过；
- * 像 "3.14"、"2026-05-26" 这类带分隔符的内容，仍会进入翻译流程。
+ * 跳过：
+ * - 空白
+ * - 纯数字
+ * - 日期
+ * - URL
+ * - 邮箱
+ * - 纯标点/纯符号
  */
 function shouldTranslateText(text) {
   if (typeof text !== "string") return false;
@@ -154,26 +143,97 @@ function shouldTranslateText(text) {
   const compact = text.trim();
   if (!compact) return false;
 
-  // 去掉空白后再判断，避免 "   123   "、" ！！ " 这种情况
   const stripped = compact.replace(/\s+/g, "");
   if (!stripped) return false;
 
-  // 纯数字
-  if (/^[\p{N}]+$/u.test(stripped)) {
-    return false;
-  }
-
-  // 纯符号 / 标点
-  if (/^[\p{P}\p{S}]+$/u.test(stripped)) {
-    return false;
-  }
+  if (isPurePunctuationOrSymbols(stripped)) return false;
+  if (isLikelyEmail(stripped)) return false;
+  if (isLikelyUrl(stripped)) return false;
+  if (isLikelyDate(stripped)) return false;
+  if (isNumericLike(stripped)) return false;
 
   return true;
 }
 
+function getSkipReason(text) {
+  const compact = typeof text === "string" ? text.trim().replace(/\s+/g, "") : "";
+
+  if (!compact) return "empty";
+  if (isPurePunctuationOrSymbols(compact)) return "pure_punctuation_or_symbols";
+  if (isLikelyEmail(compact)) return "email";
+  if (isLikelyUrl(compact)) return "url";
+  if (isLikelyDate(compact)) return "date";
+  if (isNumericLike(compact)) return "numeric";
+
+  return "unknown";
+}
+
+function isPurePunctuationOrSymbols(text) {
+  return /^[\p{P}\p{S}]+$/u.test(text);
+}
+
+function isLikelyEmail(text) {
+  // 足够实用的邮箱判断，避免把普通文本误判得太多
+  return /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i.test(text);
+}
+
+function isLikelyUrl(text) {
+  const t = text.trim();
+
+  if (/^(https?:\/\/|ftp:\/\/|file:\/\/)/i.test(t)) {
+    return true;
+  }
+
+  if (/^www\./i.test(t)) {
+    return true;
+  }
+
+  // bare domain / domain+path
+  if (/^[^\s@]+\.[^\s@]{2,}(?:\/\S*)?$/i.test(t)) {
+    try {
+      const normalized = t.includes("://") ? t : `https://${t}`;
+      const url = new URL(normalized);
+      return Boolean(url.hostname);
+    } catch {
+      return false;
+    }
+  }
+
+  return false;
+}
+
+function isLikelyDate(text) {
+  const t = text.trim();
+
+  const datePatterns = [
+    // 2026-05-26 / 2026/05/26 / 2026.05.26
+    /^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}$/,
+    // 2026-05-26T10:00 / 2026-05-26 10:00:00Z
+    /^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}[T\s]\d{1,2}:\d{2}(:\d{2})?(?:Z|[+\-]\d{2}:?\d{2})?$/,
+    // 2026年5月26日 / 2026年5月
+    /^\d{4}年\d{1,2}月(?:\d{1,2}[日号]?)?$/,
+    // 5月26日 / 5月
+    /^\d{1,2}月(?:\d{1,2}[日号]?)?$/,
+    // 26/05/2026 / 26-05-2026 / 05/26/2026
+    /^\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}$/,
+  ];
+
+  return datePatterns.some((re) => re.test(t));
+}
+
+function isNumericLike(text) {
+  const t = text.trim();
+  if (!t) return false;
+
+  // 纯数字，允许常见数字分隔符/货币/百分号/正负号
+  // 不包含字母或汉字，避免把 "iPhone 15" 之类误判掉
+  return /^[+\-−—]?(?:\p{N}|\d)[\p{N}\d,.\s:%/\\()（）￥$€£¥·+-]*$/u.test(t) &&
+    !/[\p{L}\p{Script=Han}]/u.test(t);
+}
+
 /**
  * 调用后台翻译服务
- * 对应你上传的 background/service worker 中的 TRANSLATE_TEXT 入口
+ * 对应 background/service worker 中的 TRANSLATE_TEXT 入口
  */
 function translateTextViaBackground(text) {
   return new Promise((resolve, reject) => {
