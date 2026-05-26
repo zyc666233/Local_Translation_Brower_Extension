@@ -1,6 +1,6 @@
 const DEFAULT_SETTINGS = {
   apiBaseUrl: "http://localhost:1234/v1",
-  modelName: "qwen3.5-9b-uncensored-hauhaucs-aggressive",
+  modelName: "hy-mt2-1.8b",
   defaultTargetLanguage: "Chinese",
 };
 

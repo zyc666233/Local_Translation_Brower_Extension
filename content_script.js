@@ -4,12 +4,14 @@
  * 1. 仅响应右键菜单触发的翻译消息
  * 2. 按选区拆分为多个文本节点片段
  * 3. 跳过：纯数字、日期、URL、邮箱、纯标点/符号等无需翻译内容
- * 4. 逐段调用后台模型服务翻译为中文
- * 5. 每返回一个翻译结果，就立即替换对应文本，实现逐步替换效果
- * 6. 仅替换原位置的文本内容，不修改标签结构和属性
+ * 4. 最多 4 个并发调用后台模型服务翻译为中文
+ * 5. 同一次选区内，相同文本只翻译一次
+ * 6. 每返回一个翻译结果，就立即替换对应文本，实现逐步替换效果
+ * 7. 仅替换原位置的文本内容，不修改标签结构和属性
  */
 
 const TRANSLATE_TARGET_LANGUAGE = "Chinese";
+const MAX_CONCURRENT_TRANSLATIONS = 4;
 let isTranslatingSelection = false;
 
 chrome.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
@@ -62,54 +64,82 @@ async function translateCurrentSelectionInPlace() {
 
   try {
     const changedSegments = [];
-    const translatedTextCache = new Map();
 
+    // 1) 先收集需要翻译的文本，并按文本内容分组
+    const textGroups = new Map(); // text -> [segment, segment, ...]
     for (const segment of segments) {
-      const { textNode, start, end, selectedPart, parentEl } = segment;
-      const originalText = textNode.nodeValue || "";
+      const text = segment.selectedPart;
+      if (!shouldTranslateText(text)) continue;
 
-      // 跳过不需要翻译的片段
-      if (!shouldTranslateText(selectedPart)) {
+      if (!textGroups.has(text)) {
+        textGroups.set(text, []);
+      }
+      textGroups.get(text).push(segment);
+    }
+
+    // 2) 同一次选区内做文本级缓存：
+    //    - pending: 正在请求中的 Promise
+    //    - resolved: 已经拿到的翻译结果
+    const translationCache = new Map(); // text -> Promise<string> | string
+
+    // 3) 生成任务：每个“唯一文本”只创建一个任务
+    const uniqueTexts = [...textGroups.keys()];
+    const tasks = uniqueTexts.map((text) => async () => {
+      const translated = await getTranslationWithCache(text, translationCache);
+
+      if (typeof translated !== "string" || !translated.length) {
+        return;
+      }
+
+      const relatedSegments = textGroups.get(text) || [];
+
+      // 一个文本翻译完成后，立刻把所有相同文本位置一起替换
+      for (const segment of relatedSegments) {
+        const { textNode, start, end, selectedPart, parentEl } = segment;
+        const originalText = textNode.nodeValue || "";
+
+        if (
+          !originalText ||
+          start < 0 ||
+          end > originalText.length ||
+          end <= start
+        ) {
+          continue;
+        }
+
+        textNode.nodeValue =
+          originalText.slice(0, start) +
+          translated +
+          originalText.slice(end);
+
         changedSegments.push({
           originalText: selectedPart,
-          translatedText: selectedPart,
-          skipped: true,
-          reason: getSkipReason(selectedPart),
+          translatedText: translated,
+          skipped: false,
           tag: parentEl ? parentEl.tagName.toLowerCase() : null,
           href: getAnchorHref(parentEl),
           path: parentEl ? buildDomPath(parentEl) : null,
         });
-        continue;
       }
 
-      // 同一段文本如果后面再次出现，直接复用结果
-      let translated = translatedTextCache.get(selectedPart);
+      await nextFrame();
+    });
 
-      if (typeof translated !== "string") {
-        translated = await translateTextViaBackground(selectedPart);
-        translatedTextCache.set(selectedPart, translated);
-      }
+    await runWithConcurrencyLimit(tasks, MAX_CONCURRENT_TRANSLATIONS);
 
-      if (typeof translated !== "string" || !translated.length) {
-        continue;
-      }
-
-      textNode.nodeValue =
-        originalText.slice(0, start) +
-        translated +
-        originalText.slice(end);
+    // 4) 跳过的片段也记录一下
+    for (const segment of segments) {
+      if (shouldTranslateText(segment.selectedPart)) continue;
 
       changedSegments.push({
-        originalText: selectedPart,
-        translatedText: translated,
-        skipped: false,
-        tag: parentEl ? parentEl.tagName.toLowerCase() : null,
-        href: getAnchorHref(parentEl),
-        path: parentEl ? buildDomPath(parentEl) : null,
+        originalText: segment.selectedPart,
+        translatedText: segment.selectedPart,
+        skipped: true,
+        reason: getSkipReason(segment.selectedPart),
+        tag: segment.parentEl ? segment.parentEl.tagName.toLowerCase() : null,
+        href: getAnchorHref(segment.parentEl),
+        path: segment.parentEl ? buildDomPath(segment.parentEl) : null,
       });
-
-      // 让浏览器有机会先绘制，再处理下一段，视觉上更像“逐步替换”
-      await nextFrame();
     }
 
     sel.removeAllRanges();
@@ -121,10 +151,69 @@ async function translateCurrentSelectionInPlace() {
   }
 }
 
+/**
+ * 文本级缓存：
+ * - 同一次选区内相同文本只请求一次
+ * - 如果 Promise 正在进行，后续直接复用同一个 Promise
+ * - 如果已经得到结果，后续直接复用结果
+ */
+async function getTranslationWithCache(text, cacheMap) {
+  const cached = cacheMap.get(text);
+
+  if (typeof cached === "string") {
+    return cached;
+  }
+
+  if (cached && typeof cached.then === "function") {
+    return cached;
+  }
+
+  const pendingPromise = translateTextViaBackground(text)
+    .then((translated) => {
+      cacheMap.set(text, translated);
+      return translated;
+    })
+    .catch((err) => {
+      // 出错后清掉缓存，避免卡死；后续如果还有机会，可重新请求
+      cacheMap.delete(text);
+      throw err;
+    });
+
+  cacheMap.set(text, pendingPromise);
+  return pendingPromise;
+}
+
 function nextFrame() {
   return new Promise((resolve) => {
     requestAnimationFrame(() => resolve());
   });
+}
+
+/**
+ * 并发池：最多同时跑 limit 个任务
+ */
+async function runWithConcurrencyLimit(tasks, limit) {
+  if (!Array.isArray(tasks) || tasks.length === 0) return;
+
+  const workerCount = Math.max(1, Math.min(limit || 1, tasks.length));
+  let nextIndex = 0;
+
+  const workers = Array.from({ length: workerCount }, async () => {
+    while (true) {
+      const currentIndex = nextIndex++;
+      if (currentIndex >= tasks.length) break;
+
+      const task = tasks[currentIndex];
+
+      try {
+        await task();
+      } catch (err) {
+        console.warn("翻译任务失败：", err);
+      }
+    }
+  });
+
+  await Promise.all(workers);
 }
 
 /**
@@ -173,7 +262,6 @@ function isPurePunctuationOrSymbols(text) {
 }
 
 function isLikelyEmail(text) {
-  // 足够实用的邮箱判断，避免把普通文本误判得太多
   return /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i.test(text);
 }
 
@@ -188,7 +276,6 @@ function isLikelyUrl(text) {
     return true;
   }
 
-  // bare domain / domain+path
   if (/^[^\s@]+\.[^\s@]{2,}(?:\/\S*)?$/i.test(t)) {
     try {
       const normalized = t.includes("://") ? t : `https://${t}`;
@@ -206,15 +293,10 @@ function isLikelyDate(text) {
   const t = text.trim();
 
   const datePatterns = [
-    // 2026-05-26 / 2026/05/26 / 2026.05.26
     /^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}$/,
-    // 2026-05-26T10:00 / 2026-05-26 10:00:00Z
     /^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}[T\s]\d{1,2}:\d{2}(:\d{2})?(?:Z|[+\-]\d{2}:?\d{2})?$/,
-    // 2026年5月26日 / 2026年5月
     /^\d{4}年\d{1,2}月(?:\d{1,2}[日号]?)?$/,
-    // 5月26日 / 5月
     /^\d{1,2}月(?:\d{1,2}[日号]?)?$/,
-    // 26/05/2026 / 26-05-2026 / 05/26/2026
     /^\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}$/,
   ];
 
@@ -225,15 +307,14 @@ function isNumericLike(text) {
   const t = text.trim();
   if (!t) return false;
 
-  // 纯数字，允许常见数字分隔符/货币/百分号/正负号
-  // 不包含字母或汉字，避免把 "iPhone 15" 之类误判掉
-  return /^[+\-−—]?(?:\p{N}|\d)[\p{N}\d,.\s:%/\\()（）￥$€£¥·+-]*$/u.test(t) &&
-    !/[\p{L}\p{Script=Han}]/u.test(t);
+  return (
+    /^[+\-−—]?(?:\p{N}|\d)[\p{N}\d,.\s:%/\\()（）￥$€£¥·+-]*$/u.test(t) &&
+    !/[\p{L}\p{Script=Han}]/u.test(t)
+  );
 }
 
 /**
  * 调用后台翻译服务
- * 对应 background/service worker 中的 TRANSLATE_TEXT 入口
  */
 function translateTextViaBackground(text) {
   return new Promise((resolve, reject) => {
@@ -263,16 +344,6 @@ function translateTextViaBackground(text) {
 
 /**
  * 获取选区中每个文本节点的实际选中片段
- * 返回：
- * [
- *   {
- *     textNode,
- *     parentEl,
- *     start,
- *     end,
- *     selectedPart
- *   }
- * ]
  */
 function getSelectionTextNodeSegments(range) {
   const commonAncestor =
@@ -367,18 +438,12 @@ function getSelectedBoundsInTextNode(textNode, range) {
   return { start, end };
 }
 
-/**
- * 获取父节点对应的 a 链接 href
- */
 function getAnchorHref(parentEl) {
   if (!parentEl) return null;
   const anchor = parentEl.closest("a");
   return anchor ? anchor.href : null;
 }
 
-/**
- * 生成一个尽量清晰的 DOM 路径，方便调试
- */
 function buildDomPath(el) {
   const parts = [];
   let current = el;

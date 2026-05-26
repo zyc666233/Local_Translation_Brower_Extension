@@ -51,7 +51,7 @@ function populateLangSelects(defaultTarget) {
 async function translateText(text, tgtLang) {
   const settings = await chrome.storage.sync.get({
     apiBaseUrl: "http://localhost:1234/v1",
-    modelName: "qwen3.5-9b-uncensored-hauhaucs-aggressive",
+    modelName: "hy-mt2-1.8b",
     defaultTargetLanguage: "Chinese",
   });
 
