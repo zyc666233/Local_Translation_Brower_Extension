@@ -4,6 +4,11 @@ const DEFAULT_SETTINGS = {
   defaultTargetLanguage: "Chinese",
 };
 
+const CACHE_MAX_ENTRIES = 500;
+const CACHE_TTL_MS = 10 * 24 * 60 * 60 * 1000; // 10 天
+const CACHE_MAINTENANCE_THROTTLE_MS = 10 * 60 * 1000; // 10 分钟内最多做一次维护
+let lastCacheMaintenanceAt = 0;
+
 function initDB() {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open("TranslationCache", 1);
@@ -20,19 +25,158 @@ function initDB() {
   });
 }
 
+function getCacheKey(text, targetLanguage) {
+  return `${text}|${targetLanguage}`;
+}
+
+function requestToPromise(req) {
+  return new Promise((resolve, reject) => {
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function transactionDone(tx) {
+  return new Promise((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
+  });
+}
+
+async function readCacheRecord(db, key) {
+  const tx = db.transaction("translations", "readonly");
+  const store = tx.objectStore("translations");
+  const req = store.get(key);
+  const record = await requestToPromise(req);
+  await transactionDone(tx).catch(() => {});
+  return record || null;
+}
+
+async function putCacheRecord(db, record) {
+  const tx = db.transaction("translations", "readwrite");
+  const store = tx.objectStore("translations");
+  const req = store.put(record);
+  await requestToPromise(req);
+  await transactionDone(tx);
+}
+
+async function deleteCacheKeys(db, keys) {
+  if (!Array.isArray(keys) || keys.length === 0) return;
+
+  const tx = db.transaction("translations", "readwrite");
+  const store = tx.objectStore("translations");
+
+  for (const key of keys) {
+    store.delete(key);
+  }
+
+  await transactionDone(tx);
+}
+
+async function readAllCacheRecords(db) {
+  const tx = db.transaction("translations", "readonly");
+  const store = tx.objectStore("translations");
+  const req = store.getAll();
+  const records = await requestToPromise(req);
+  await transactionDone(tx).catch(() => {});
+  return Array.isArray(records) ? records : [];
+}
+
+function getRecordLastUsedAt(record) {
+  return (
+    record?.accessedAt ??
+    record?.updatedAt ??
+    record?.timestamp ??
+    record?.createdAt ??
+    0
+  );
+}
+
+function isRecordExpired(record, now = Date.now()) {
+  const lastUsedAt = getRecordLastUsedAt(record);
+  if (!lastUsedAt) return true;
+  return now - lastUsedAt > CACHE_TTL_MS;
+}
+
+async function touchCacheRecord(db, record) {
+  if (!record?.key) return;
+
+  const now = Date.now();
+  const nextRecord = {
+    ...record,
+    createdAt: record.createdAt ?? record.timestamp ?? now,
+    accessedAt: now,
+    updatedAt: now,
+    timestamp: record.timestamp ?? now,
+  };
+
+  await putCacheRecord(db, nextRecord);
+}
+
+async function pruneCacheIfNeeded(db, force = false) {
+  const now = Date.now();
+
+  if (!force && now - lastCacheMaintenanceAt < CACHE_MAINTENANCE_THROTTLE_MS) {
+    return;
+  }
+
+  lastCacheMaintenanceAt = now;
+
+  const allRecords = await readAllCacheRecords(db);
+  if (!allRecords.length) return;
+
+  const expiredKeys = [];
+  const validRecords = [];
+
+  for (const record of allRecords) {
+    if (!record?.key) continue;
+
+    if (isRecordExpired(record, now)) {
+      expiredKeys.push(record.key);
+      continue;
+    }
+
+    validRecords.push(record);
+  }
+
+  validRecords.sort((a, b) => getRecordLastUsedAt(a) - getRecordLastUsedAt(b));
+
+  const overflowCount = Math.max(0, validRecords.length - CACHE_MAX_ENTRIES);
+  const lruKeys = validRecords.slice(0, overflowCount).map((r) => r.key);
+
+  const keysToDelete = [...new Set([...expiredKeys, ...lruKeys])];
+  if (!keysToDelete.length) return;
+
+  await deleteCacheKeys(db, keysToDelete);
+}
+
 async function getCachedTranslation(text, targetLanguage) {
   try {
-    const key = `${text}|${targetLanguage}`;
+    const key = getCacheKey(text, targetLanguage);
     const db = await initDB();
+    const record = await readCacheRecord(db, key);
 
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction("translations", "readonly");
-      const store = tx.objectStore("translations");
-      const req = store.get(key);
+    if (!record?.translated) {
+      await pruneCacheIfNeeded(db).catch(() => {});
+      return null;
+    }
 
-      req.onsuccess = () => resolve(req.result?.translated || null);
-      req.onerror = () => reject(req.error);
-    });
+    const now = Date.now();
+
+    if (isRecordExpired(record, now)) {
+      await deleteCacheKeys(db, [key]).catch(() => {});
+      await pruneCacheIfNeeded(db).catch(() => {});
+      return null;
+    }
+
+    // 命中后刷新 LRU 时间
+    await touchCacheRecord(db, record).catch(() => {});
+
+    // 维护一下过期和溢出记录
+    await pruneCacheIfNeeded(db).catch(() => {});
+
+    return record.translated;
   } catch {
     return null;
   }
@@ -40,23 +184,22 @@ async function getCachedTranslation(text, targetLanguage) {
 
 async function setCachedTranslation(text, targetLanguage, translated) {
   try {
-    const key = `${text}|${targetLanguage}`;
+    const key = getCacheKey(text, targetLanguage);
     const db = await initDB();
+    const now = Date.now();
 
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction("translations", "readwrite");
-      const store = tx.objectStore("translations");
-      const req = store.put({
-        key,
-        text,
-        targetLanguage,
-        translated,
-        timestamp: Date.now(),
-      });
-
-      req.onsuccess = () => resolve();
-      req.onerror = () => reject(req.error);
+    await putCacheRecord(db, {
+      key,
+      text,
+      targetLanguage,
+      translated,
+      createdAt: now,
+      accessedAt: now,
+      updatedAt: now,
+      timestamp: now, // 兼容旧字段
     });
+
+    await pruneCacheIfNeeded(db, true);
   } catch (err) {
     console.warn("Cache write error:", err);
   }
@@ -100,8 +243,20 @@ chrome.runtime.onInstalled.addListener(async () => {
   try {
     await ensureDefaultSettings();
     await createContextMenus();
+    const db = await initDB();
+    await pruneCacheIfNeeded(db, true);
   } catch (err) {
     console.error("Initialization failed:", err);
+  }
+});
+
+chrome.runtime.onStartup.addListener(async () => {
+  try {
+    await createContextMenus();
+    const db = await initDB();
+    await pruneCacheIfNeeded(db, true);
+  } catch (err) {
+    console.error("Startup initialization failed:", err);
   }
 });
 
@@ -151,7 +306,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return false;
 });
 
-async function translateText({ text, settings, targetLanguage: explicitTargetLanguage }) {
+async function translateText({
+  text,
+  settings,
+  targetLanguage: explicitTargetLanguage,
+}) {
   const input = typeof text === "string" ? text : String(text ?? "");
   if (!input.trim()) {
     throw new Error("待翻译文本为空");
