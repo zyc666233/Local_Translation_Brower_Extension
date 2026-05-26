@@ -6,7 +6,7 @@ const DEFAULT_SETTINGS = {
 
 const CACHE_MAX_ENTRIES = 500;
 const CACHE_TTL_MS = 10 * 24 * 60 * 60 * 1000; // 10 天
-const CACHE_MAINTENANCE_THROTTLE_MS = 10 * 60 * 1000; // 10 分钟内最多做一次维护
+const CACHE_MAINTENANCE_THROTTLE_MS = 10 * 60 * 1000; // 10 分钟
 let lastCacheMaintenanceAt = 0;
 
 function initDB() {
@@ -84,13 +84,7 @@ async function readAllCacheRecords(db) {
 }
 
 function getRecordLastUsedAt(record) {
-  return (
-    record?.accessedAt ??
-    record?.updatedAt ??
-    record?.timestamp ??
-    record?.createdAt ??
-    0
-  );
+  return record?.accessedAt ?? record?.createdAt ?? 0;
 }
 
 function isRecordExpired(record, now = Date.now()) {
@@ -105,10 +99,7 @@ async function touchCacheRecord(db, record) {
   const now = Date.now();
   const nextRecord = {
     ...record,
-    createdAt: record.createdAt ?? record.timestamp ?? now,
     accessedAt: now,
-    updatedAt: now,
-    timestamp: record.timestamp ?? now,
   };
 
   await putCacheRecord(db, nextRecord);
@@ -163,17 +154,13 @@ async function getCachedTranslation(text, targetLanguage) {
     }
 
     const now = Date.now();
-
     if (isRecordExpired(record, now)) {
       await deleteCacheKeys(db, [key]).catch(() => {});
       await pruneCacheIfNeeded(db).catch(() => {});
       return null;
     }
 
-    // 命中后刷新 LRU 时间
     await touchCacheRecord(db, record).catch(() => {});
-
-    // 维护一下过期和溢出记录
     await pruneCacheIfNeeded(db).catch(() => {});
 
     return record.translated;
@@ -195,8 +182,6 @@ async function setCachedTranslation(text, targetLanguage, translated) {
       translated,
       createdAt: now,
       accessedAt: now,
-      updatedAt: now,
-      timestamp: now, // 兼容旧字段
     });
 
     await pruneCacheIfNeeded(db, true);
@@ -289,6 +274,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           text: message.text,
           settings,
           targetLanguage: message.targetLanguage,
+          translationMode: message.translationMode,
         });
 
         sendResponse({ ok: true, ...result });
@@ -310,14 +296,28 @@ async function translateText({
   text,
   settings,
   targetLanguage: explicitTargetLanguage,
+  translationMode,
 }) {
   const input = typeof text === "string" ? text : String(text ?? "");
   if (!input.trim()) {
     throw new Error("待翻译文本为空");
   }
 
-  const targetLanguage =
-    explicitTargetLanguage || settings.defaultTargetLanguage || "Chinese";
+  const isSelectionMode = translationMode === "selection";
+
+  const targetLanguage = isSelectionMode
+    ? "Chinese"
+    : explicitTargetLanguage || settings.defaultTargetLanguage || "Chinese";
+
+  if (isSelectionMode && isPureChineseText(input)) {
+    return {
+      translated: input,
+      targetLanguage,
+      fromCache: false,
+      skipped: true,
+      reason: "already_chinese",
+    };
+  }
 
   const cached = await getCachedTranslation(input, targetLanguage);
   if (cached) {
@@ -331,12 +331,20 @@ async function translateText({
   const apiBaseUrl = settings.apiBaseUrl.replace(/\/$/, "");
   const modelName = settings.modelName;
 
-  const systemPrompt = [
-    "你是一个专业翻译引擎。",
-    "请忠实、自然地将用户输入的文本翻译成目标语言。",
-    "只输出翻译结果，不要添加任何解释、注释、前缀或后缀。",
-    `请将输入文本翻译为${targetLanguage}。`,
-  ].join(" ");
+  const systemPrompt = isSelectionMode
+    ? [
+        "你是一个专业翻译引擎。",
+        "目标语言固定为中文。",
+        "如果输入文本本身已经是纯中文，直接原样输出，不要改写，不要润色，不要补充。",
+        "如果输入不是中文，请忠实、自然地翻译为中文。",
+        "只输出最终结果，不要添加任何解释、注释、前缀或后缀。",
+      ].join(" ")
+    : [
+        "你是一个专业翻译引擎。",
+        "请忠实、自然地将用户输入的文本翻译成目标语言。",
+        "只输出翻译结果，不要添加任何解释、注释、前缀或后缀。",
+        `请将输入文本翻译为${targetLanguage}。`,
+      ].join(" ");
 
   const body = {
     model: modelName,
@@ -375,4 +383,28 @@ async function translateText({
     translated,
     targetLanguage,
   };
+}
+
+function isPureChineseText(text) {
+  if (typeof text !== "string") return false;
+
+  const compact = text.trim();
+  if (!compact) return false;
+
+  // 只要出现拉丁字母，就不按“纯中文”处理
+  if (/[A-Za-z]/.test(compact)) {
+    return false;
+  }
+
+  // 至少要有一个汉字
+  if (!/\p{Script=Han}/u.test(compact)) {
+    return false;
+  }
+
+  try {
+    return LangDetect.detect(compact) === "Chinese";
+  } catch (err) {
+    console.warn("LangDetect.detect failed:", err);
+    return false;
+  }
 }

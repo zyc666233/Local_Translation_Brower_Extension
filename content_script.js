@@ -3,7 +3,7 @@
  * 功能：
  * 1. 仅响应右键菜单触发的翻译消息
  * 2. 按选区拆分为多个文本节点片段
- * 3. 跳过：纯数字、日期、URL、邮箱、纯标点/符号等无需翻译内容
+ * 3. 跳过：纯数字、日期、URL、邮箱、纯标点/符号、纯中文等无需翻译内容
  * 4. 最多 4 个并发调用后台模型服务翻译为中文
  * 5. 同一次选区内，相同文本只翻译一次
  * 6. 每返回一个翻译结果，就立即替换对应文本，实现逐步替换效果
@@ -65,8 +65,7 @@ async function translateCurrentSelectionInPlace() {
   try {
     const changedSegments = [];
 
-    // 1) 先收集需要翻译的文本，并按文本内容分组
-    const textGroups = new Map(); // text -> [segment, segment, ...]
+    const textGroups = new Map(); // text -> [segment...]
     for (const segment of segments) {
       const text = segment.selectedPart;
       if (!shouldTranslateText(text)) continue;
@@ -77,12 +76,7 @@ async function translateCurrentSelectionInPlace() {
       textGroups.get(text).push(segment);
     }
 
-    // 2) 同一次选区内做文本级缓存：
-    //    - pending: 正在请求中的 Promise
-    //    - resolved: 已经拿到的翻译结果
     const translationCache = new Map(); // text -> Promise<string> | string
-
-    // 3) 生成任务：每个“唯一文本”只创建一个任务
     const uniqueTexts = [...textGroups.keys()];
     const tasks = uniqueTexts.map((text) => async () => {
       const translated = await getTranslationWithCache(text, translationCache);
@@ -93,7 +87,6 @@ async function translateCurrentSelectionInPlace() {
 
       const relatedSegments = textGroups.get(text) || [];
 
-      // 一个文本翻译完成后，立刻把所有相同文本位置一起替换
       for (const segment of relatedSegments) {
         const { textNode, start, end, selectedPart, parentEl } = segment;
         const originalText = textNode.nodeValue || "";
@@ -127,7 +120,6 @@ async function translateCurrentSelectionInPlace() {
 
     await runWithConcurrencyLimit(tasks, MAX_CONCURRENT_TRANSLATIONS);
 
-    // 4) 跳过的片段也记录一下
     for (const segment of segments) {
       if (shouldTranslateText(segment.selectedPart)) continue;
 
@@ -151,12 +143,6 @@ async function translateCurrentSelectionInPlace() {
   }
 }
 
-/**
- * 文本级缓存：
- * - 同一次选区内相同文本只请求一次
- * - 如果 Promise 正在进行，后续直接复用同一个 Promise
- * - 如果已经得到结果，后续直接复用结果
- */
 async function getTranslationWithCache(text, cacheMap) {
   const cached = cacheMap.get(text);
 
@@ -174,7 +160,6 @@ async function getTranslationWithCache(text, cacheMap) {
       return translated;
     })
     .catch((err) => {
-      // 出错后清掉缓存，避免卡死；后续如果还有机会，可重新请求
       cacheMap.delete(text);
       throw err;
     });
@@ -189,9 +174,6 @@ function nextFrame() {
   });
 }
 
-/**
- * 并发池：最多同时跑 limit 个任务
- */
 async function runWithConcurrencyLimit(tasks, limit) {
   if (!Array.isArray(tasks) || tasks.length === 0) return;
 
@@ -216,16 +198,6 @@ async function runWithConcurrencyLimit(tasks, limit) {
   await Promise.all(workers);
 }
 
-/**
- * 判断文本是否需要翻译
- * 跳过：
- * - 空白
- * - 纯数字
- * - 日期
- * - URL
- * - 邮箱
- * - 纯标点/纯符号
- */
 function shouldTranslateText(text) {
   if (typeof text !== "string") return false;
 
@@ -235,6 +207,7 @@ function shouldTranslateText(text) {
   const stripped = compact.replace(/\s+/g, "");
   if (!stripped) return false;
 
+  if (isPureChineseText(stripped)) return false;
   if (isPurePunctuationOrSymbols(stripped)) return false;
   if (isLikelyEmail(stripped)) return false;
   if (isLikelyUrl(stripped)) return false;
@@ -248,6 +221,7 @@ function getSkipReason(text) {
   const compact = typeof text === "string" ? text.trim().replace(/\s+/g, "") : "";
 
   if (!compact) return "empty";
+  if (isPureChineseText(compact)) return "pure_chinese";
   if (isPurePunctuationOrSymbols(compact)) return "pure_punctuation_or_symbols";
   if (isLikelyEmail(compact)) return "email";
   if (isLikelyUrl(compact)) return "url";
@@ -255,6 +229,29 @@ function getSkipReason(text) {
   if (isNumericLike(compact)) return "numeric";
 
   return "unknown";
+}
+function isPureChineseText(text) {
+  if (typeof text !== "string") return false;
+
+  const compact = text.trim();
+  if (!compact) return false;
+
+  // 只要出现拉丁字母，就不按“纯中文”处理
+  if (/[A-Za-z]/.test(compact)) {
+    return false;
+  }
+
+  // 至少要有一个汉字
+  if (!/\p{Script=Han}/u.test(compact)) {
+    return false;
+  }
+
+  try {
+    return LangDetect.detect(compact) === "Chinese";
+  } catch (err) {
+    console.warn("LangDetect.detect failed:", err);
+    return false;
+  }
 }
 
 function isPurePunctuationOrSymbols(text) {
@@ -266,27 +263,61 @@ function isLikelyEmail(text) {
 }
 
 function isLikelyUrl(text) {
-  const t = text.trim();
+  const t = String(text ?? "").trim();
+  if (!t) return false;
 
-  if (/^(https?:\/\/|ftp:\/\/|file:\/\/)/i.test(t)) {
+  // 选区文本里只要有空白，基本就不是单独的 URL 片段
+  // 这样可以避免 "StreamChannel wrappers for WebSockets." 这类句子被误判
+  if (/\s/.test(t)) return false;
+
+  // 先去掉常见包裹符号，减少误判
+  const cleaned = t.replace(/^[('"“<\[]+|[)'”>\].,;:!?]+$/g, "");
+  if (!cleaned) return false;
+
+  // 1) 明确的协议 URL
+  if (/^(https?|ftp|file):\/\/[^\s/$.?#].[^\s]*$/i.test(cleaned)) {
     return true;
   }
 
-  if (/^www\./i.test(t)) {
+  // 2) www 开头
+  if (/^www\.[^\s/$.?#].[^\s]*$/i.test(cleaned)) {
     return true;
   }
 
-  if (/^[^\s@]+\.[^\s@]{2,}(?:\/\S*)?$/i.test(t)) {
-    try {
-      const normalized = t.includes("://") ? t : `https://${t}`;
-      const url = new URL(normalized);
-      return Boolean(url.hostname);
-    } catch {
+  // 3) 仅把“非常像域名/路径”的内容当 URL
+  //    注意：这里故意比之前严格很多，避免 retrofit.dart 这类误判
+  try {
+    const normalized = `https://${cleaned}`;
+    const url = new URL(normalized);
+
+    const host = url.hostname;
+    if (!host || !host.includes(".")) return false;
+
+    // host 必须只包含合法域名字符
+    if (!/^[a-z0-9.-]+$/i.test(host)) return false;
+
+    // 允许：
+    // - www.example.com
+    // - example.com/path
+    // - example.com?x=1
+    // - example.com#hash
+    //
+    // 但对像 retrofit.dart 这种“单个点、无路径、无参数”的短词组，直接放行不判 URL
+    const hasPathOrQueryOrHash =
+      (url.pathname && url.pathname !== "/") || url.search || url.hash;
+
+    const dotCount = (host.match(/\./g) || []).length;
+
+    // 过于短、过于像普通单词的内容，不当作 URL
+    // 例如 retrofit.dart / source_gen / WebSockets 这类都不会误中
+    if (dotCount === 1 && !hasPathOrQueryOrHash) {
       return false;
     }
-  }
 
-  return false;
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function isLikelyDate(text) {
@@ -313,9 +344,6 @@ function isNumericLike(text) {
   );
 }
 
-/**
- * 调用后台翻译服务
- */
 function translateTextViaBackground(text) {
   return new Promise((resolve, reject) => {
     chrome.runtime.sendMessage(
@@ -323,6 +351,7 @@ function translateTextViaBackground(text) {
         type: "TRANSLATE_TEXT",
         text,
         targetLanguage: TRANSLATE_TARGET_LANGUAGE,
+        translationMode: "selection",
       },
       (response) => {
         const lastError = chrome.runtime.lastError;
@@ -342,9 +371,6 @@ function translateTextViaBackground(text) {
   });
 }
 
-/**
- * 获取选区中每个文本节点的实际选中片段
- */
 function getSelectionTextNodeSegments(range) {
   const commonAncestor =
     range.commonAncestorContainer.nodeType === Node.TEXT_NODE
@@ -405,9 +431,6 @@ function getSelectionTextNodeSegments(range) {
   return segments;
 }
 
-/**
- * 计算某个文本节点在当前选区中的起止位置
- */
 function getSelectedBoundsInTextNode(textNode, range) {
   const fullText = textNode.nodeValue || "";
   if (!fullText) return null;
