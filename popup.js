@@ -76,7 +76,7 @@ async function translateText(text, tgtLang) {
     "Output ONLY the translated text, no extra commentary.",
   ].join("\n");
 
-  const resp = await fetch(`${settings.apiBaseUrl.replace(/\/$/, '')}/chat/completions`, {
+  const resp = await fetch(`${settings.apiBaseUrl.replace(/\/$/, '')}/v1/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({

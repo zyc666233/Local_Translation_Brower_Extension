@@ -1,6 +1,6 @@
 const DEFAULT_SETTINGS = {
-  apiBaseUrl: "http://localhost:1234/v1",
-  chatPath: "/chat/completions",
+  apiBaseUrl: "http://localhost:1234",
+  chatPath: "/v1/chat/completions",
   modelName: "hy-mt2-1.8b",
 
   apiKey: "",
@@ -28,6 +28,8 @@ const MENU_IDS = {
   translatePage: "translate-page",
   restorePage: "restore-page",
 };
+
+const TEST_SENTINEL = "Ping";
 
 let lastCacheMaintenanceAt = 0;
 
@@ -77,10 +79,9 @@ async function readCacheRecord(db, key) {
   const store = tx.objectStore("translations");
 
   const req = store.get(key);
-
   const result = await requestToPromise(req);
 
-  await transactionDone(tx).catch(() => {});
+  await transactionDone(tx).catch(() => { });
 
   return result || null;
 }
@@ -90,7 +91,6 @@ async function putCacheRecord(db, record) {
   const store = tx.objectStore("translations");
 
   const req = store.put(record);
-
   await requestToPromise(req);
 
   await transactionDone(tx);
@@ -114,10 +114,9 @@ async function readAllCacheRecords(db) {
   const store = tx.objectStore("translations");
 
   const req = store.getAll();
-
   const result = await requestToPromise(req);
 
-  await transactionDone(tx).catch(() => {});
+  await transactionDone(tx).catch(() => { });
 
   return Array.isArray(result) ? result : [];
 }
@@ -128,9 +127,7 @@ function getRecordLastUsedAt(record) {
 
 function isRecordExpired(record, now = Date.now()) {
   const lastUsedAt = getRecordLastUsedAt(record);
-
   if (!lastUsedAt) return true;
-
   return now - lastUsedAt > CACHE_TTL_MS;
 }
 
@@ -146,18 +143,13 @@ async function touchCacheRecord(db, record) {
 async function pruneCacheIfNeeded(db, force = false) {
   const now = Date.now();
 
-  if (
-    !force &&
-    now - lastCacheMaintenanceAt <
-      CACHE_MAINTENANCE_THROTTLE_MS
-  ) {
+  if (!force && now - lastCacheMaintenanceAt < CACHE_MAINTENANCE_THROTTLE_MS) {
     return;
   }
 
   lastCacheMaintenanceAt = now;
 
   const records = await readAllCacheRecords(db);
-
   if (!records.length) return;
 
   const expiredKeys = [];
@@ -174,77 +166,37 @@ async function pruneCacheIfNeeded(db, force = false) {
     validRecords.push(record);
   }
 
-  validRecords.sort(
-    (a, b) =>
-      getRecordLastUsedAt(a) -
-      getRecordLastUsedAt(b)
-  );
+  validRecords.sort((a, b) => getRecordLastUsedAt(a) - getRecordLastUsedAt(b));
 
-  const overflowCount = Math.max(
-    0,
-    validRecords.length - CACHE_MAX_ENTRIES
-  );
+  const overflowCount = Math.max(0, validRecords.length - CACHE_MAX_ENTRIES);
+  const lruKeys = validRecords.slice(0, overflowCount).map((r) => r.key);
 
-  const lruKeys = validRecords
-    .slice(0, overflowCount)
-    .map((r) => r.key);
-
-  const keysToDelete = [
-    ...new Set([...expiredKeys, ...lruKeys]),
-  ];
-
+  const keysToDelete = [...new Set([...expiredKeys, ...lruKeys])];
   if (!keysToDelete.length) return;
 
   await deleteCacheKeys(db, keysToDelete);
 }
 
-async function getCachedTranslation(
-  text,
-  targetLanguage
-) {
+async function getCachedTranslation(text, targetLanguage) {
   try {
-    const key = getCacheKey(
-      text,
-      targetLanguage
-    );
-
+    const key = getCacheKey(text, targetLanguage);
     const db = await initDB();
-
-    const record = await readCacheRecord(
-      db,
-      key
-    );
+    const record = await readCacheRecord(db, key);
 
     if (!record?.translated) {
-      await pruneCacheIfNeeded(db).catch(
-        () => {}
-      );
-
+      await pruneCacheIfNeeded(db).catch(() => { });
       return null;
     }
 
     const now = Date.now();
-
     if (isRecordExpired(record, now)) {
-      await deleteCacheKeys(db, [key]).catch(
-        () => {}
-      );
-
-      await pruneCacheIfNeeded(db).catch(
-        () => {}
-      );
-
+      await deleteCacheKeys(db, [key]).catch(() => { });
+      await pruneCacheIfNeeded(db).catch(() => { });
       return null;
     }
 
-    await touchCacheRecord(
-      db,
-      record
-    ).catch(() => {});
-
-    await pruneCacheIfNeeded(db).catch(
-      () => {}
-    );
+    await touchCacheRecord(db, record).catch(() => { });
+    await pruneCacheIfNeeded(db).catch(() => { });
 
     return record.translated;
   } catch {
@@ -252,19 +204,10 @@ async function getCachedTranslation(
   }
 }
 
-async function setCachedTranslation(
-  text,
-  targetLanguage,
-  translated
-) {
+async function setCachedTranslation(text, targetLanguage, translated) {
   try {
-    const key = getCacheKey(
-      text,
-      targetLanguage
-    );
-
+    const key = getCacheKey(text, targetLanguage);
     const db = await initDB();
-
     const now = Date.now();
 
     await putCacheRecord(db, {
@@ -283,10 +226,7 @@ async function setCachedTranslation(
 }
 
 async function loadSettings() {
-  const current = await chrome.storage.sync.get(
-    DEFAULT_SETTINGS
-  );
-
+  const current = await chrome.storage.sync.get(DEFAULT_SETTINGS);
   return {
     ...DEFAULT_SETTINGS,
     ...current,
@@ -294,10 +234,7 @@ async function loadSettings() {
 }
 
 async function ensureDefaultSettings() {
-  const current = await chrome.storage.sync.get(
-    DEFAULT_SETTINGS
-  );
-
+  const current = await chrome.storage.sync.get(DEFAULT_SETTINGS);
   await chrome.storage.sync.set({
     ...current,
     ...DEFAULT_SETTINGS,
@@ -309,9 +246,7 @@ async function ensureDefaultSettings() {
  */
 async function createContextMenus() {
   await new Promise((resolve) => {
-    chrome.contextMenus.removeAll(() =>
-      resolve()
-    );
+    chrome.contextMenus.removeAll(() => resolve());
   });
 
   chrome.contextMenus.create({
@@ -339,167 +274,111 @@ async function createContextMenus() {
   });
 }
 
-chrome.runtime.onInstalled.addListener(
-  async () => {
-    try {
-      await ensureDefaultSettings();
+chrome.runtime.onInstalled.addListener(async () => {
+  try {
+    await ensureDefaultSettings();
+    await createContextMenus();
 
-      await createContextMenus();
-
-      const db = await initDB();
-
-      await pruneCacheIfNeeded(db, true);
-    } catch (err) {
-      console.error(
-        "Initialization failed:",
-        err
-      );
-    }
+    const db = await initDB();
+    await pruneCacheIfNeeded(db, true);
+  } catch (err) {
+    console.error("Initialization failed:", err);
   }
-);
+});
 
-chrome.runtime.onStartup.addListener(
-  async () => {
-    try {
-      await createContextMenus();
+chrome.runtime.onStartup.addListener(async () => {
+  try {
+    await createContextMenus();
 
-      const db = await initDB();
-
-      await pruneCacheIfNeeded(db, true);
-    } catch (err) {
-      console.error(
-        "Startup initialization failed:",
-        err
-      );
-    }
+    const db = await initDB();
+    await pruneCacheIfNeeded(db, true);
+  } catch (err) {
+    console.error("Startup initialization failed:", err);
   }
-);
+});
 
-chrome.contextMenus.onClicked.addListener(
-  async (info, tab) => {
-    if (!tab?.id) return;
+chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+  if (!tab?.id) return;
 
-    if (
-      info.menuItemId ===
-      MENU_IDS.translateSelection
-    ) {
-      chrome.tabs.sendMessage(tab.id, {
-        type: "TRANSLATE_SELECTION",
-      });
-
-      return;
-    }
-
-    if (
-      info.menuItemId ===
-      MENU_IDS.restoreSelection
-    ) {
-      chrome.tabs.sendMessage(tab.id, {
-        type: "RESTORE_SELECTION",
-      });
-
-      return;
-    }
-
-    if (
-      info.menuItemId ===
-      MENU_IDS.translatePage
-    ) {
-      chrome.tabs.sendMessage(tab.id, {
-        type: "TRANSLATE_PAGE",
-      });
-
-      return;
-    }
-
-    if (
-      info.menuItemId ===
-      MENU_IDS.restorePage
-    ) {
-      chrome.tabs.sendMessage(tab.id, {
-        type: "RESTORE_PAGE",
-      });
-
-      return;
-    }
+  if (info.menuItemId === MENU_IDS.translateSelection) {
+    chrome.tabs.sendMessage(tab.id, {
+      type: "TRANSLATE_SELECTION",
+    });
+    return;
   }
-);
+
+  if (info.menuItemId === MENU_IDS.restoreSelection) {
+    chrome.tabs.sendMessage(tab.id, {
+      type: "RESTORE_SELECTION",
+    });
+    return;
+  }
+
+  if (info.menuItemId === MENU_IDS.translatePage) {
+    chrome.tabs.sendMessage(tab.id, {
+      type: "TRANSLATE_PAGE",
+    });
+    return;
+  }
+
+  if (info.menuItemId === MENU_IDS.restorePage) {
+    chrome.tabs.sendMessage(tab.id, {
+      type: "RESTORE_PAGE",
+    });
+    return;
+  }
+});
 
 /**
  * Runtime Messages
  */
-chrome.runtime.onMessage.addListener(
-  (message, sender, sendResponse) => {
-    if (!message?.type) return false;
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (!message?.type) return false;
 
-    /**
-     * Translation
-     */
-    if (message.type === "TRANSLATE_TEXT") {
-      (async () => {
-        try {
-          const settings =
-            await loadSettings();
+  if (message.type === "TRANSLATE_TEXT") {
+    (async () => {
+      try {
+        const settings = await loadSettings();
+        const result = await translateText({
+          text: message.text,
+          settings,
+          targetLanguage: message.targetLanguage,
+          translationMode: message.translationMode,
+        });
 
-          const result =
-            await translateText({
-              text: message.text,
-              settings,
-              targetLanguage:
-                message.targetLanguage,
-              translationMode:
-                message.translationMode,
-            });
+        sendResponse({
+          ok: true,
+          ...result,
+        });
+      } catch (err) {
+        sendResponse({
+          ok: false,
+          error: err?.message || String(err),
+        });
+      }
+    })();
 
-          sendResponse({
-            ok: true,
-            ...result,
-          });
-        } catch (err) {
-          sendResponse({
-            ok: false,
-            error:
-              err?.message ||
-              String(err),
-          });
-        }
-      })();
-
-      return true;
-    }
-
-    /**
-     * API Test
-     */
-    if (
-      message.type ===
-      "TEST_OPENAI_API"
-    ) {
-      (async () => {
-        try {
-          await testOpenAICompatibleAPI(
-            message.settings
-          );
-
-          sendResponse({
-            ok: true,
-          });
-        } catch (err) {
-          sendResponse({
-            ok: false,
-            error:
-              err?.message ||
-              String(err),
-          });
-        }
-      })();
-
-      return true;
-    }
-
-    return false;
+    return true;
   }
-);
+
+  if (message.type === "TEST_OPENAI_API") {
+    (async () => {
+      try {
+        await testOpenAICompatibleAPI(message.settings);
+        sendResponse({ ok: true });
+      } catch (err) {
+        sendResponse({
+          ok: false,
+          error: err?.message || String(err),
+        });
+      }
+    })();
+
+    return true;
+  }
+
+  return false;
+});
 
 /**
  * Translation
@@ -507,34 +386,23 @@ chrome.runtime.onMessage.addListener(
 async function translateText({
   text,
   settings,
-  targetLanguage:
-    explicitTargetLanguage,
+  targetLanguage: explicitTargetLanguage,
   translationMode,
 }) {
-  const input =
-    typeof text === "string"
-      ? text
-      : String(text ?? "");
+  const input = typeof text === "string" ? text : String(text ?? "");
 
   if (!input.trim()) {
     throw new Error("待翻译文本为空");
   }
 
   const forcedChineseMode =
-    translationMode === "selection" ||
-    translationMode === "page";
+    translationMode === "selection" || translationMode === "page";
 
-  const targetLanguage =
-    forcedChineseMode
-      ? "Chinese"
-      : explicitTargetLanguage ||
-        settings.defaultTargetLanguage ||
-        "Chinese";
+  const targetLanguage = forcedChineseMode
+    ? "Chinese"
+    : explicitTargetLanguage || settings.defaultTargetLanguage || "Chinese";
 
-  if (
-    forcedChineseMode &&
-    isPureChineseText(input)
-  ) {
+  if (forcedChineseMode && isPureChineseText(input)) {
     return {
       translated: input,
       targetLanguage,
@@ -543,12 +411,7 @@ async function translateText({
     };
   }
 
-  const cached =
-    await getCachedTranslation(
-      input,
-      targetLanguage
-    );
-
+  const cached = await getCachedTranslation(input, targetLanguage);
   if (cached) {
     return {
       translated: cached,
@@ -557,19 +420,15 @@ async function translateText({
     };
   }
 
-  const translated =
-    await requestOpenAICompatibleAPI({
-      settings,
-      input,
-      targetLanguage,
-      forcedChineseMode,
-    });
-
-  await setCachedTranslation(
+  const translated = await requestOpenAICompatibleAPI({
+    settings,
     input,
     targetLanguage,
-    translated
-  );
+    forcedChineseMode,
+    purpose: "translate",
+  });
+
+  await setCachedTranslation(input, targetLanguage, translated);
 
   return {
     translated,
@@ -588,6 +447,111 @@ function coerceNumber(value, fallback) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function coerceProbability(value, fallback) {
+  const n = coerceNumber(value, fallback);
+  if (n < 0) return 0;
+  if (n > 1) return 1;
+  return n;
+}
+
+function previewText(text) {
+  return String(text ?? "").replace(/\s+/g, " ").slice(0, 120);
+}
+
+function buildRequestHeaders(settings) {
+  const headers = {
+    "Content-Type": "application/json",
+  };
+
+  if (settings.apiKey) {
+    headers[settings.apiKeyHeader || "Authorization"] = settings.apiKeyPrefix
+      ? `${settings.apiKeyPrefix} ${settings.apiKey}`
+      : settings.apiKey;
+  }
+
+  let extraHeaders = {};
+  try {
+    extraHeaders = JSON.parse(settings.extraHeaders || "{}");
+  } catch {
+    extraHeaders = {};
+  }
+
+  Object.assign(headers, extraHeaders);
+  return headers;
+}
+
+function buildChatBody({
+  settings,
+  input,
+  targetLanguage,
+  forcedChineseMode,
+  purpose,
+}) {
+  const isTestMode = purpose === "test";
+
+  const systemPrompt = isTestMode
+    ? [
+      "You are a connection test for an OpenAI-compatible chat API.",
+      `Reply with exactly ${TEST_SENTINEL}.`,
+      "Do not add any extra characters, punctuation, or whitespace.",
+    ].join(" ")
+    : forcedChineseMode
+      ? [
+        "你是一个网页翻译引擎。",
+        "目标语言固定为中文。",
+        "如果输入已经是中文则原样输出。",
+        "请忠实自然地翻译。",
+        "只输出翻译结果。",
+      ].join(" ")
+      : [
+        "You are a professional translation engine.",
+        `Translate the following text into ${targetLanguage}.`,
+        "Output ONLY the translated text.",
+      ].join(" ");
+
+  const temperature = isTestMode
+    ? 0
+    : coerceProbability(settings.temperature, DEFAULT_SETTINGS.temperature);
+
+  const topK = isTestMode ? 1 : coerceNumber(settings.topK, DEFAULT_SETTINGS.topK);
+
+  const topP = isTestMode ? 1 : coerceProbability(settings.topP, DEFAULT_SETTINGS.topP);
+
+  const maxTokens = isTestMode
+    ? 8
+    : Math.max(1, coerceNumber(settings.maxTokens, DEFAULT_SETTINGS.maxTokens));
+
+  return {
+    model: settings.modelName,
+    messages: [
+      {
+        role: "system",
+        content: systemPrompt,
+      },
+      {
+        role: "user",
+        content: isTestMode ? "Ping" : input,
+      },
+    ],
+    temperature,
+    top_k: topK,
+    top_p: topP,
+    max_tokens: maxTokens,
+    stream: false,
+    // 关闭思考模式（兼容多种 OpenAI-like 实现）
+    reasoning: {
+      enabled: false,
+    },
+    extra_body: {
+      thinking: {
+        type: "disabled"
+      }
+    }
+    // enable_thinking: false,
+    // thinking: false,
+  };
+}
+
 /**
  * OpenAI Compatible Request
  */
@@ -596,132 +560,64 @@ async function requestOpenAICompatibleAPI({
   input,
   targetLanguage,
   forcedChineseMode,
+  purpose = "translate",
 }) {
-  const headers = {
-    "Content-Type": "application/json",
-  };
+  const headers = buildRequestHeaders(settings);
 
-  /**
-   * Authorization
-   */
-  if (settings.apiKey) {
-    headers[
-      settings.apiKeyHeader ||
-      "Authorization"
-    ] = settings.apiKeyPrefix
-      ? `${settings.apiKeyPrefix} ${settings.apiKey}`
-      : settings.apiKey;
-  }
-
-  /**
-   * Extra Headers
-   */
-  let extraHeaders = {};
-
-  try {
-    extraHeaders = JSON.parse(
-      settings.extraHeaders || "{}"
-    );
-  } catch {
-    extraHeaders = {};
-  }
-
-  Object.assign(headers, extraHeaders);
-
-  const controller =
-    new AbortController();
-
+  const controller = new AbortController();
   const timeoutId = setTimeout(() => {
     controller.abort();
   }, settings.timeoutMs || 120000);
 
   try {
-    const base =
-      settings.apiBaseUrl.replace(
-        /\/$/,
-        ""
-      );
+    const base = settings.apiBaseUrl.replace(/\/$/, "");
+    const path = settings.chatPath.startsWith("/")
+      ? settings.chatPath
+      : `/${settings.chatPath}`;
 
-    const path =
-      settings.chatPath.startsWith("/")
-        ? settings.chatPath
-        : `/${settings.chatPath}`;
-
-    const systemPrompt =
-      forcedChineseMode
-        ? [
-            "你是一个网页翻译引擎。",
-            "目标语言固定为中文。",
-            "如果输入已经是中文则原样输出。",
-            "请忠实自然地翻译。",
-            "只输出翻译结果。",
-          ].join(" ")
-        : [
-            "You are a professional translation engine.",
-            `Translate the following text into ${targetLanguage}.`,
-            "Output ONLY the translated text.",
-          ].join(" ");
-
-    const temperature = coerceNumber(
-      settings.temperature,
-      DEFAULT_SETTINGS.temperature
-    );
-
-    const topK = coerceNumber(
-      settings.topK,
-      DEFAULT_SETTINGS.topK
-    );
-
-    const topP = coerceNumber(
-      settings.topP,
-      DEFAULT_SETTINGS.topP
-    );
-
-    const maxTokens = Math.max(
-      1,
-      coerceNumber(
-        settings.maxTokens,
-        DEFAULT_SETTINGS.maxTokens
-      )
-    );
-
-    const resp = await fetch(
-      `${base}${path}`,
-      {
-        method: "POST",
-        headers,
-        signal: controller.signal,
-        body: JSON.stringify({
-          model: settings.modelName,
-          messages: [
-            {
-              role: "system",
-              content: systemPrompt,
-            },
-            {
-              role: "user",
-              content: input,
-            },
-          ],
-          temperature,
-          top_k: topK,
-          top_p: topP,
-          max_tokens: maxTokens,
-          stream: false,
-        }),
-      }
-    );
+    const body = buildChatBody({
+      settings,
+      input,
+      targetLanguage,
+      forcedChineseMode,
+      purpose,
+    });
+    const resp = await fetch(`${base}${path}`, {
+      method: "POST",
+      headers,
+      signal: controller.signal,
+      body: JSON.stringify(body),
+    });
 
     if (!resp.ok) {
-      throw new Error(await resp.text());
+      errorDetail = await resp.text();
+      if (purpose === "test") {
+        throw new Error(`连接测试失败：${errorDetail}`);
+      }
+      throw new Error(`异常：${errorDetail}`);
     }
 
     const data = await resp.json();
+    const content = data?.choices?.[0]?.message?.content;
 
-    return (
-      data?.choices?.[0]?.message
-        ?.content?.trim() || input
-    );
+
+
+    if (typeof content !== "string" || !content.trim()) {
+      throw new Error(`连接测试失败：模型接口返回为空或格式不正确 ${content}`);
+    }
+
+    const normalized = content.trim();
+
+    if (purpose === "test") {
+      if (normalized !== TEST_SENTINEL) {
+        throw new Error(
+          `连接测试失败：模型接口返回了意外内容 "${previewText(normalized)}"`
+        );
+      }
+      return normalized;
+    }
+
+    return normalized;
   } finally {
     clearTimeout(timeoutId);
   }
@@ -730,40 +626,35 @@ async function requestOpenAICompatibleAPI({
 /**
  * API Test
  */
-async function testOpenAICompatibleAPI(
-  settings
-) {
-  return requestOpenAICompatibleAPI({
+async function testOpenAICompatibleAPI(settings) {
+  const result = await requestOpenAICompatibleAPI({
     settings,
-    input: "hello",
-    targetLanguage: "Chinese",
+    input: TEST_SENTINEL,
+    targetLanguage: "English",
     forcedChineseMode: false,
+    purpose: "test",
   });
+
+  if (result !== TEST_SENTINEL) {
+    throw new Error(
+      `连接测试失败：模型接口返回结果不符合预期 "${previewText(result)}"`
+    );
+  }
+
+  return result;
 }
 
 /**
  * Utils
  */
 function isPureChineseText(text) {
-  if (typeof text !== "string") {
-    return false;
-  }
+  if (typeof text !== "string") return false;
 
   const compact = text.trim();
-
   if (!compact) return false;
 
-  if (/[A-Za-z]/.test(compact)) {
-    return false;
-  }
-
-  if (
-    !/\p{Script=Han}/u.test(
-      compact
-    )
-  ) {
-    return false;
-  }
+  if (/[A-Za-z]/.test(compact)) return false;
+  if (!/\p{Script=Han}/u.test(compact)) return false;
 
   try {
     return (

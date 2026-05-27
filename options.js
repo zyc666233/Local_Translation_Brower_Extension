@@ -1,6 +1,6 @@
 const DEFAULT_SETTINGS = {
-  apiBaseUrl: "http://localhost:1234/v1",
-  chatPath: "/chat/completions",
+  apiBaseUrl: "http://localhost:1234",
+  chatPath: "/v1/chat/completions",
   modelName: "hy-mt2-1.8b",
   apiKey: "",
   apiKeyHeader: "Authorization",
