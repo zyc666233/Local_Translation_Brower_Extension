@@ -1,6 +1,20 @@
 const DEFAULT_SETTINGS = {
   apiBaseUrl: "http://localhost:1234/v1",
+  chatPath: "/chat/completions",
   modelName: "hy-mt2-1.8b",
+
+  apiKey: "",
+  apiKeyHeader: "Authorization",
+  apiKeyPrefix: "Bearer",
+
+  temperature: 0.7,
+  topK: 20,
+  topP: 0.6,
+  maxTokens: 4096,
+  timeoutMs: 120000,
+
+  extraHeaders: "{}",
+
   defaultTargetLanguage: "Chinese",
 };
 
@@ -17,14 +31,20 @@ const MENU_IDS = {
 
 let lastCacheMaintenanceAt = 0;
 
+/**
+ * IndexedDB
+ */
 function initDB() {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open("TranslationCache", 1);
 
     req.onupgradeneeded = (e) => {
       const db = e.target.result;
+
       if (!db.objectStoreNames.contains("translations")) {
-        db.createObjectStore("translations", { keyPath: "key" });
+        db.createObjectStore("translations", {
+          keyPath: "key",
+        });
       }
     };
 
@@ -55,22 +75,29 @@ function transactionDone(tx) {
 async function readCacheRecord(db, key) {
   const tx = db.transaction("translations", "readonly");
   const store = tx.objectStore("translations");
+
   const req = store.get(key);
-  const record = await requestToPromise(req);
-  await transactionDone(tx).catch(() => {});
-  return record || null;
+
+  const result = await requestToPromise(req);
+
+  await transactionDone(tx).catch(() => { });
+
+  return result || null;
 }
 
 async function putCacheRecord(db, record) {
   const tx = db.transaction("translations", "readwrite");
   const store = tx.objectStore("translations");
+
   const req = store.put(record);
+
   await requestToPromise(req);
+
   await transactionDone(tx);
 }
 
 async function deleteCacheKeys(db, keys) {
-  if (!Array.isArray(keys) || keys.length === 0) return;
+  if (!Array.isArray(keys) || !keys.length) return;
 
   const tx = db.transaction("translations", "readwrite");
   const store = tx.objectStore("translations");
@@ -85,10 +112,14 @@ async function deleteCacheKeys(db, keys) {
 async function readAllCacheRecords(db) {
   const tx = db.transaction("translations", "readonly");
   const store = tx.objectStore("translations");
+
   const req = store.getAll();
-  const records = await requestToPromise(req);
-  await transactionDone(tx).catch(() => {});
-  return Array.isArray(records) ? records : [];
+
+  const result = await requestToPromise(req);
+
+  await transactionDone(tx).catch(() => { });
+
+  return Array.isArray(result) ? result : [];
 }
 
 function getRecordLastUsedAt(record) {
@@ -97,7 +128,9 @@ function getRecordLastUsedAt(record) {
 
 function isRecordExpired(record, now = Date.now()) {
   const lastUsedAt = getRecordLastUsedAt(record);
+
   if (!lastUsedAt) return true;
+
   return now - lastUsedAt > CACHE_TTL_MS;
 }
 
@@ -113,13 +146,18 @@ async function touchCacheRecord(db, record) {
 async function pruneCacheIfNeeded(db, force = false) {
   const now = Date.now();
 
-  if (!force && now - lastCacheMaintenanceAt < CACHE_MAINTENANCE_THROTTLE_MS) {
+  if (
+    !force &&
+    now - lastCacheMaintenanceAt <
+    CACHE_MAINTENANCE_THROTTLE_MS
+  ) {
     return;
   }
 
   lastCacheMaintenanceAt = now;
 
   const records = await readAllCacheRecords(db);
+
   if (!records.length) return;
 
   const expiredKeys = [];
@@ -136,37 +174,77 @@ async function pruneCacheIfNeeded(db, force = false) {
     validRecords.push(record);
   }
 
-  validRecords.sort((a, b) => getRecordLastUsedAt(a) - getRecordLastUsedAt(b));
+  validRecords.sort(
+    (a, b) =>
+      getRecordLastUsedAt(a) -
+      getRecordLastUsedAt(b)
+  );
 
-  const overflowCount = Math.max(0, validRecords.length - CACHE_MAX_ENTRIES);
-  const lruKeys = validRecords.slice(0, overflowCount).map((r) => r.key);
+  const overflowCount = Math.max(
+    0,
+    validRecords.length - CACHE_MAX_ENTRIES
+  );
 
-  const keysToDelete = [...new Set([...expiredKeys, ...lruKeys])];
+  const lruKeys = validRecords
+    .slice(0, overflowCount)
+    .map((r) => r.key);
+
+  const keysToDelete = [
+    ...new Set([...expiredKeys, ...lruKeys]),
+  ];
+
   if (!keysToDelete.length) return;
 
   await deleteCacheKeys(db, keysToDelete);
 }
 
-async function getCachedTranslation(text, targetLanguage) {
+async function getCachedTranslation(
+  text,
+  targetLanguage
+) {
   try {
-    const key = getCacheKey(text, targetLanguage);
+    const key = getCacheKey(
+      text,
+      targetLanguage
+    );
+
     const db = await initDB();
-    const record = await readCacheRecord(db, key);
+
+    const record = await readCacheRecord(
+      db,
+      key
+    );
 
     if (!record?.translated) {
-      await pruneCacheIfNeeded(db).catch(() => {});
+      await pruneCacheIfNeeded(db).catch(
+        () => { }
+      );
+
       return null;
     }
 
     const now = Date.now();
+
     if (isRecordExpired(record, now)) {
-      await deleteCacheKeys(db, [key]).catch(() => {});
-      await pruneCacheIfNeeded(db).catch(() => {});
+      await deleteCacheKeys(db, [key]).catch(
+        () => { }
+      );
+
+      await pruneCacheIfNeeded(db).catch(
+        () => { }
+      );
+
       return null;
     }
 
-    await touchCacheRecord(db, record).catch(() => {});
-    await pruneCacheIfNeeded(db).catch(() => {});
+    await touchCacheRecord(
+      db,
+      record
+    ).catch(() => { });
+
+    await pruneCacheIfNeeded(db).catch(
+      () => { }
+    );
 
     return record.translated;
   } catch {
@@ -174,10 +252,19 @@ async function getCachedTranslation(text, targetLanguage) {
   }
 }
 
-async function setCachedTranslation(text, targetLanguage, translated) {
+async function setCachedTranslation(
+  text,
+  targetLanguage,
+  translated
+) {
   try {
-    const key = getCacheKey(text, targetLanguage);
+    const key = getCacheKey(
+      text,
+      targetLanguage
+    );
+
     const db = await initDB();
+
     const now = Date.now();
 
     await putCacheRecord(db, {
@@ -196,7 +283,10 @@ async function setCachedTranslation(text, targetLanguage, translated) {
 }
 
 async function loadSettings() {
-  const current = await chrome.storage.sync.get(DEFAULT_SETTINGS);
+  const current = await chrome.storage.sync.get(
+    DEFAULT_SETTINGS
+  );
+
   return {
     ...DEFAULT_SETTINGS,
     ...current,
@@ -204,16 +294,24 @@ async function loadSettings() {
 }
 
 async function ensureDefaultSettings() {
-  const current = await chrome.storage.sync.get(DEFAULT_SETTINGS);
+  const current = await chrome.storage.sync.get(
+    DEFAULT_SETTINGS
+  );
+
   await chrome.storage.sync.set({
     ...current,
     ...DEFAULT_SETTINGS,
   });
 }
 
+/**
+ * Context Menus
+ */
 async function createContextMenus() {
   await new Promise((resolve) => {
-    chrome.contextMenus.removeAll(() => resolve());
+    chrome.contextMenus.removeAll(() =>
+      resolve()
+    );
   });
 
   chrome.contextMenus.create({
@@ -241,106 +339,202 @@ async function createContextMenus() {
   });
 }
 
-chrome.runtime.onInstalled.addListener(async () => {
-  try {
-    await ensureDefaultSettings();
-    await createContextMenus();
-    const db = await initDB();
-    await pruneCacheIfNeeded(db, true);
-  } catch (err) {
-    console.error("Initialization failed:", err);
+chrome.runtime.onInstalled.addListener(
+  async () => {
+    try {
+      await ensureDefaultSettings();
+
+      await createContextMenus();
+
+      const db = await initDB();
+
+      await pruneCacheIfNeeded(db, true);
+    } catch (err) {
+      console.error(
+        "Initialization failed:",
+        err
+      );
+    }
   }
-});
+);
 
-chrome.runtime.onStartup.addListener(async () => {
-  try {
-    await createContextMenus();
-    const db = await initDB();
-    await pruneCacheIfNeeded(db, true);
-  } catch (err) {
-    console.error("Startup initialization failed:", err);
+chrome.runtime.onStartup.addListener(
+  async () => {
+    try {
+      await createContextMenus();
+
+      const db = await initDB();
+
+      await pruneCacheIfNeeded(db, true);
+    } catch (err) {
+      console.error(
+        "Startup initialization failed:",
+        err
+      );
+    }
   }
-});
+);
 
-chrome.contextMenus.onClicked.addListener(async (info, tab) => {
-  if (!tab?.id) return;
+chrome.contextMenus.onClicked.addListener(
+  async (info, tab) => {
+    if (!tab?.id) return;
 
-  if (info.menuItemId === MENU_IDS.translateSelection) {
-    chrome.tabs.sendMessage(tab.id, {
-      type: "TRANSLATE_SELECTION",
-    });
-    return;
+    if (
+      info.menuItemId ===
+      MENU_IDS.translateSelection
+    ) {
+      chrome.tabs.sendMessage(tab.id, {
+        type: "TRANSLATE_SELECTION",
+      });
+
+      return;
+    }
+
+    if (
+      info.menuItemId ===
+      MENU_IDS.restoreSelection
+    ) {
+      chrome.tabs.sendMessage(tab.id, {
+        type: "RESTORE_SELECTION",
+      });
+
+      return;
+    }
+
+    if (
+      info.menuItemId ===
+      MENU_IDS.translatePage
+    ) {
+      chrome.tabs.sendMessage(tab.id, {
+        type: "TRANSLATE_PAGE",
+      });
+
+      return;
+    }
+
+    if (
+      info.menuItemId ===
+      MENU_IDS.restorePage
+    ) {
+      chrome.tabs.sendMessage(tab.id, {
+        type: "RESTORE_PAGE",
+      });
+
+      return;
+    }
   }
+);
 
-  if (info.menuItemId === MENU_IDS.restoreSelection) {
-    chrome.tabs.sendMessage(tab.id, {
-      type: "RESTORE_SELECTION",
-    });
-    return;
+/**
+ * Runtime Messages
+ */
+chrome.runtime.onMessage.addListener(
+  (message, sender, sendResponse) => {
+    if (!message?.type) return false;
+
+    /**
+     * Translation
+     */
+    if (message.type === "TRANSLATE_TEXT") {
+      (async () => {
+        try {
+          const settings =
+            await loadSettings();
+
+          const result =
+            await translateText({
+              text: message.text,
+              settings,
+              targetLanguage:
+                message.targetLanguage,
+              translationMode:
+                message.translationMode,
+            });
+
+          sendResponse({
+            ok: true,
+            ...result,
+          });
+        } catch (err) {
+          sendResponse({
+            ok: false,
+            error:
+              err?.message ||
+              String(err),
+          });
+        }
+      })();
+
+      return true;
+    }
+
+    /**
+     * API Test
+     */
+    if (
+      message.type ===
+      "TEST_OPENAI_API"
+    ) {
+      (async () => {
+        try {
+          await testOpenAICompatibleAPI(
+            message.settings
+          );
+
+          sendResponse({
+            ok: true,
+          });
+        } catch (err) {
+          sendResponse({
+            ok: false,
+            error:
+              err?.message ||
+              String(err),
+          });
+        }
+      })();
+
+      return true;
+    }
+
+    return false;
   }
+);
 
-  if (info.menuItemId === MENU_IDS.translatePage) {
-    chrome.tabs.sendMessage(tab.id, {
-      type: "TRANSLATE_PAGE",
-    });
-    return;
-  }
-
-  if (info.menuItemId === MENU_IDS.restorePage) {
-    chrome.tabs.sendMessage(tab.id, {
-      type: "RESTORE_PAGE",
-    });
-  }
-});
-
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (!message?.type) return false;
-
-  if (message.type === "TRANSLATE_TEXT") {
-    (async () => {
-      try {
-        const settings = await loadSettings();
-        const result = await translateText({
-          text: message.text,
-          settings,
-          targetLanguage: message.targetLanguage,
-          translationMode: message.translationMode,
-        });
-
-        sendResponse({ ok: true, ...result });
-      } catch (err) {
-        sendResponse({
-          ok: false,
-          error: err?.message || String(err),
-        });
-      }
-    })();
-
-    return true;
-  }
-
-  return false;
-});
-
+/**
+ * Translation
+ */
 async function translateText({
   text,
   settings,
-  targetLanguage: explicitTargetLanguage,
+  targetLanguage:
+  explicitTargetLanguage,
   translationMode,
 }) {
-  const input = typeof text === "string" ? text : String(text ?? "");
+  const input =
+    typeof text === "string"
+      ? text
+      : String(text ?? "");
+
   if (!input.trim()) {
     throw new Error("待翻译文本为空");
   }
 
   const forcedChineseMode =
-    translationMode === "selection" || translationMode === "page";
+    translationMode === "selection" ||
+    translationMode === "page";
 
-  const targetLanguage = forcedChineseMode
-    ? "Chinese"
-    : explicitTargetLanguage || settings.defaultTargetLanguage || "Chinese";
+  const targetLanguage =
+    forcedChineseMode
+      ? "Chinese"
+      : explicitTargetLanguage ||
+      settings.defaultTargetLanguage ||
+      "Chinese";
 
-  if (forcedChineseMode && isPureChineseText(input)) {
+  if (
+    forcedChineseMode &&
+    isPureChineseText(input)
+  ) {
     return {
       translated: input,
       targetLanguage,
@@ -349,7 +543,12 @@ async function translateText({
     };
   }
 
-  const cached = await getCachedTranslation(input, targetLanguage);
+  const cached =
+    await getCachedTranslation(
+      input,
+      targetLanguage
+    );
+
   if (cached) {
     return {
       translated: cached,
@@ -358,49 +557,19 @@ async function translateText({
     };
   }
 
-  const apiBaseUrl = settings.apiBaseUrl.replace(/\/$/, "");
-  const modelName = settings.modelName;
+  const translated =
+    await requestOpenAICompatibleAPI({
+      settings,
+      input,
+      targetLanguage,
+      forcedChineseMode,
+    });
 
-  const systemPrompt = forcedChineseMode
-    ? [
-        "你是一个网页划词/整页翻译引擎。",
-        "目标语言固定为中文。",
-        "如果输入文本本身已经是纯中文，直接原样输出。",
-        "如果输入不是中文，请忠实、自然地翻译为中文。",
-        "只输出翻译结果，不要添加任何解释、注释、前缀或后缀。",
-      ].join(" ")
-    : [
-        "You are a professional translation engine.",
-        `Translate the following text into ${targetLanguage}.`,
-        "Translate faithfully and naturally. Preserve meaning, tone, punctuation, formatting, HTML tags, and placeholders.",
-        "Output ONLY the translated text, no extra commentary.",
-      ].join(" ");
-
-  const resp = await fetch(`${apiBaseUrl}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: modelName,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: input },
-      ],
-      temperature: 0,
-      top_p: 0.9,
-      stream: false,
-    }),
-  });
-
-  if (!resp.ok) {
-    throw new Error(await resp.text());
-  }
-
-  const data = await resp.json();
-  const translated = data?.choices?.[0]?.message?.content?.trim() || input;
-
-  await setCachedTranslation(input, targetLanguage, translated);
+  await setCachedTranslation(
+    input,
+    targetLanguage,
+    translated
+  );
 
   return {
     translated,
@@ -408,17 +577,168 @@ async function translateText({
   };
 }
 
-function isPureChineseText(text) {
-  if (typeof text !== "string") return false;
+/**
+ * OpenAI Compatible Request
+ */
+async function requestOpenAICompatibleAPI({
+  settings,
+  input,
+  targetLanguage,
+  forcedChineseMode,
+}) {
+  const headers = {
+    "Content-Type":
+      "application/json",
+  };
 
-  const compact = text.trim();
-  if (!compact) return false;
+  /**
+   * Authorization
+   */
+  if (settings.apiKey) {
+    headers[
+      settings.apiKeyHeader ||
+      "Authorization"
+    ] = settings.apiKeyPrefix
+        ? `${settings.apiKeyPrefix} ${settings.apiKey}`
+        : settings.apiKey;
+  }
 
-  if (/[A-Za-z]/.test(compact)) return false;
-  if (!/\p{Script=Han}/u.test(compact)) return false;
+  /**
+   * Extra Headers
+   */
+  let extraHeaders = {};
 
   try {
-    return LangDetect.detect(compact) === "Chinese";
+    extraHeaders = JSON.parse(
+      settings.extraHeaders || "{}"
+    );
+  } catch {
+    extraHeaders = {};
+  }
+
+  Object.assign(headers, extraHeaders);
+
+  const controller =
+    new AbortController();
+
+  const timeoutId = setTimeout(() => {
+    controller.abort();
+  }, settings.timeoutMs || 120000);
+
+  try {
+    const base =
+      settings.apiBaseUrl.replace(
+        /\/$/,
+        ""
+      );
+
+    const path =
+      settings.chatPath.startsWith("/")
+        ? settings.chatPath
+        : `/${settings.chatPath}`;
+
+    const systemPrompt =
+      forcedChineseMode
+        ? [
+          "你是一个网页翻译引擎。",
+          "目标语言固定为中文。",
+          "如果输入已经是中文则原样输出。",
+          "请忠实自然地翻译。",
+          "只输出翻译结果。",
+        ].join(" ")
+        : [
+          "You are a professional translation engine.",
+          `Translate the following text into ${targetLanguage}.`,
+          "Output ONLY the translated text.",
+        ].join(" ");
+
+    const resp = await fetch(
+      `${base}${path}`,
+      {
+        method: "POST",
+        headers,
+        signal: controller.signal,
+        body: JSON.stringify({
+          model: settings.modelName,
+          messages: [
+            {
+              role: "system",
+              content: systemPrompt,
+            },
+            {
+              role: "user",
+              content: input,
+            },
+          ],
+          temperature:
+            settings.temperature,
+          top_k: settings.topK,
+          top_p: settings.topP,
+          max_tokens:
+            settings.maxTokens,
+          stream: false,
+        }),
+      }
+    );
+
+    if (!resp.ok) {
+      throw new Error(await resp.text());
+    }
+
+    const data = await resp.json();
+
+    return (
+      data?.choices?.[0]?.message
+        ?.content?.trim() || input
+    );
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+/**
+ * API Test
+ */
+async function testOpenAICompatibleAPI(
+  settings
+) {
+  return requestOpenAICompatibleAPI({
+    settings,
+    input: "hello",
+    targetLanguage: "Chinese",
+    forcedChineseMode: false,
+  });
+}
+
+/**
+ * Utils
+ */
+function isPureChineseText(text) {
+  if (typeof text !== "string") {
+    return false;
+  }
+
+  const compact = text.trim();
+
+  if (!compact) return false;
+
+  if (/[A-Za-z]/.test(compact)) {
+    return false;
+  }
+
+  if (
+    !/\p{Script=Han}/u.test(
+      compact
+    )
+  ) {
+    return false;
+  }
+
+  try {
+    return (
+      LangDetect.detect(compact) ===
+      "Chinese"
+    );
   } catch {
     return false;
   }

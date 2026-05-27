@@ -1,37 +1,97 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="zh-CN">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>设置</title>
-    <link rel="stylesheet" href="styles.css" />
-  </head>
-  <body class="options-body">
-    <div class="panel options-panel">
-      <h1>插件设置</h1>
 
-      <label for="apiBaseUrl">本地模型 API Base URL</label>
-      <input id="apiBaseUrl" type="text" placeholder="http://localhost:1234/v1" />
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Translator Settings</title>
+  <link rel="stylesheet" href="options.css" />
+</head>
 
-      <label for="modelName">模型名</label>
-      <input id="modelName" type="text" placeholder="hy-mt2-1.8b" />
+<body>
+  <div class="container">
+    <div class="card">
+      <h1>大模型服务 API 设置</h1>
+      <p class="desc">
+        配置兼容 OpenAI Chat Completions 格式的大模型接口。
+      </p>
 
-      <label for="defaultTargetLanguage">默认目标语言类型</label>
-      <select id="defaultTargetLanguage">
-        <option value="Chinese">中文</option>
-        <option value="English">English</option>
-        <option value="French">Français</option>
-        <option value="German">Deutsch</option>
-        <option value="Japanese">日本語</option>
-        <option value="Korean">한국어</option>
-        <option value="Russian">Русский</option>
-      </select>
-
-      <div class="row">
-        <button id="saveBtn">保存</button>
-        <span id="status"></span>
+      <div class="field-group">
+        <label>API Base URL *</label>
+        <input id="apiBaseUrl" type="text" placeholder="https://api.openai.com/v1" />
       </div>
+
+      <div class="field-group">
+        <label>Chat Completions Path *</label>
+        <input id="chatPath" type="text" placeholder="/chat/completions" />
+      </div>
+
+      <div class="field-group">
+        <label>Model Name *</label>
+        <input id="modelName" type="text" placeholder="gpt-4o-mini" />
+      </div>
+
+      <div class="field-group">
+        <label>API Key</label>
+        <input id="apiKey" type="password" placeholder="sk-xxxx" />
+      </div>
+
+      <div class="grid-2">
+        <div class="field-group">
+          <label>Authorization Header Name</label>
+          <input id="apiKeyHeader" type="text" placeholder="Authorization" />
+        </div>
+
+        <div class="field-group">
+          <label>Authorization Prefix</label>
+          <input id="apiKeyPrefix" type="text" placeholder="Bearer" />
+        </div>
+      </div>
+
+      <div class="grid-4">
+        <div class="field-group">
+          <label class="mini-label" for="temperature">Temperature</label>
+          <input id="temperature" type="number" step="0.1" min="0" max="2" />
+        </div>
+
+        <div class="field-group">
+          <label class="mini-label" for="topK">Top K</label>
+          <input id="topK" type="number" min="0" />
+        </div>
+
+        <div class="field-group">
+          <label class="mini-label" for="topP">Top P</label>
+          <input id="topP" type="number" step="0.1" min="0" max="1" />
+        </div>
+
+        <div class="field-group">
+          <label class="mini-label" for="maxTokens">Max Tokens</label>
+          <input id="maxTokens" type="number" min="1" />
+        </div>
+      </div>
+
+      <div class="field-group">
+        <label>Request Timeout (ms)</label>
+        <input id="timeoutMs" type="number" min="1000" />
+      </div>
+
+      <div class="field-group">
+        <label>Additional Headers (JSON)</label>
+        <textarea id="extraHeaders" rows="5" placeholder='{
+  "X-Custom-Header": "demo"
+}'></textarea>
+      </div>
+
+      <div class="actions">
+        <button id="saveBtn">保存设置</button>
+        <button id="testBtn" class="secondary">测试连接</button>
+      </div>
+
+      <div id="status" class="status"></div>
     </div>
-    <script src="options.js"></script>
-  </body>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+
 </html>
