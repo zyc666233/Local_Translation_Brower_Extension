@@ -540,7 +540,7 @@ function buildChatBody({
 
   const topK = isTestMode ? 1 : coerceNumber(settings.topK, DEFAULT_SETTINGS.topK);
 
-  const topP = isTestMode ? 1 : coerceProbability(settings.topP, DEFAULT_SETTINGS.topP);
+  const topP = isTestMode ? 0 : coerceProbability(settings.topP, DEFAULT_SETTINGS.topP);
 
   const maxTokens = isTestMode
     ? 8
