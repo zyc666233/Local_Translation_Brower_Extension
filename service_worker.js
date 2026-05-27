@@ -225,12 +225,37 @@ async function setCachedTranslation(text, targetLanguage, translated) {
   }
 }
 
-async function loadSettings() {
-  const current = await chrome.storage.sync.get(DEFAULT_SETTINGS);
-  return {
-    ...DEFAULT_SETTINGS,
-    ...current,
+function normalizeSettings(raw = {}) {
+  const textOrDefault = (value, fallback) => {
+    const normalized = String(value ?? "").trim();
+    return normalized === "" ? fallback : normalized;
   };
+
+  const optionalText = (value) => String(value ?? "").trim();
+
+  return {
+    apiBaseUrl: textOrDefault(raw.apiBaseUrl, DEFAULT_SETTINGS.apiBaseUrl),
+    chatPath: textOrDefault(raw.chatPath, DEFAULT_SETTINGS.chatPath),
+    modelName: textOrDefault(raw.modelName, DEFAULT_SETTINGS.modelName),
+    apiKey: optionalText(raw.apiKey),
+    apiKeyHeader: textOrDefault(raw.apiKeyHeader, DEFAULT_SETTINGS.apiKeyHeader),
+    apiKeyPrefix: textOrDefault(raw.apiKeyPrefix, DEFAULT_SETTINGS.apiKeyPrefix),
+    temperature: coerceProbability(raw.temperature, DEFAULT_SETTINGS.temperature),
+    topK: coerceNumber(raw.topK, DEFAULT_SETTINGS.topK),
+    topP: coerceProbability(raw.topP, DEFAULT_SETTINGS.topP),
+    maxTokens: Math.max(1, coerceNumber(raw.maxTokens, DEFAULT_SETTINGS.maxTokens)),
+    timeoutMs: Math.max(1000, coerceNumber(raw.timeoutMs, DEFAULT_SETTINGS.timeoutMs)),
+    extraHeaders: textOrDefault(raw.extraHeaders, DEFAULT_SETTINGS.extraHeaders),
+    defaultTargetLanguage: textOrDefault(
+      raw.defaultTargetLanguage,
+      DEFAULT_SETTINGS.defaultTargetLanguage
+    ),
+  };
+}
+
+async function loadSettings() {
+  const current = await chrome.storage.sync.get(null);
+  return normalizeSettings(current);
 }
 
 async function ensureDefaultSettings() {
@@ -364,7 +389,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "TEST_OPENAI_API") {
     (async () => {
       try {
-        await testOpenAICompatibleAPI(message.settings);
+        await testOpenAICompatibleAPI(normalizeSettings(message.settings));
         sendResponse({ ok: true });
       } catch (err) {
         sendResponse({
@@ -559,7 +584,8 @@ async function requestOpenAICompatibleAPI({
   forcedChineseMode,
   purpose = "translate",
 }) {
-  const headers = buildRequestHeaders(settings);
+  const effectiveSettings = normalizeSettings(settings);
+  const headers = buildRequestHeaders(effectiveSettings);
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => {

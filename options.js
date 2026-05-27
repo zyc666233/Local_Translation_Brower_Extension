@@ -22,6 +22,7 @@ const NUMERIC_DEFAULTS = {
 };
 
 const API_KEY_PLACEHOLDER = "sk-xxxx";
+const SETTINGS_UI_INITIALIZED_KEY = "__settingsUiInitialized";
 
 const els = {
   apiBaseUrl: document.getElementById("apiBaseUrl"),
@@ -47,12 +48,9 @@ function setStatus(text, isError = false) {
   els.status.className = isError ? "status error" : "status success";
 }
 
-function toNumberValue(value, fallback) {
-  const raw = String(value ?? "").trim();
-  if (raw === "") return fallback;
-
-  const n = Number(raw);
-  return Number.isFinite(n) ? n : fallback;
+function normalizeTextValue(value) {
+  if (value === undefined || value === null) return "";
+  return String(value).trim();
 }
 
 function bindDefaultFillBehavior(inputEl, defaultValue) {
@@ -65,7 +63,7 @@ function bindDefaultFillBehavior(inputEl, defaultValue) {
     (event) => {
       if (event.key !== "Tab") return;
 
-      const currentValue = String(inputEl.value || "").trim();
+      const currentValue = normalizeTextValue(inputEl.value);
       if (currentValue) return;
 
       event.preventDefault();
@@ -85,76 +83,72 @@ function bindDefaultFillBehavior(inputEl, defaultValue) {
   );
 }
 
-function setTextFieldValue(inputEl, savedValue, defaultValue) {
+function renderFieldValue(inputEl, savedValue, defaultValue, initialized) {
   if (!inputEl) return;
 
   inputEl.placeholder = String(defaultValue);
 
-  const normalized =
-    savedValue === undefined || savedValue === null
-      ? ""
-      : String(savedValue).trim();
+  const normalized = normalizeTextValue(savedValue);
 
-  inputEl.value =
-    normalized && normalized !== String(defaultValue) ? normalized : "";
-}
+  // 首次打开时，历史默认值显示成灰色占位；
+  // 一旦用户点过保存，就按 storage 里的真实值显示。
+  if (!initialized && normalized === String(defaultValue)) {
+    inputEl.value = "";
+    return;
+  }
 
-function setNumericFieldValue(inputEl, savedValue, defaultValue) {
-  if (!inputEl) return;
-
-  inputEl.placeholder = String(defaultValue);
-
-  const normalized =
-    savedValue === undefined || savedValue === null
-      ? ""
-      : String(savedValue).trim();
-
-  inputEl.value =
-    normalized && normalized !== String(defaultValue) ? normalized : "";
+  inputEl.value = normalized;
 }
 
 async function loadSettings() {
-  const settings = await chrome.storage.sync.get(DEFAULT_SETTINGS);
+  const settings = await chrome.storage.sync.get(null);
+  const initialized = settings[SETTINGS_UI_INITIALIZED_KEY] === true;
 
-  setTextFieldValue(els.apiBaseUrl, settings.apiBaseUrl, DEFAULT_SETTINGS.apiBaseUrl);
-  setTextFieldValue(els.chatPath, settings.chatPath, DEFAULT_SETTINGS.chatPath);
-  setTextFieldValue(els.modelName, settings.modelName, DEFAULT_SETTINGS.modelName);
-  setTextFieldValue(
+  renderFieldValue(els.apiBaseUrl, settings.apiBaseUrl, DEFAULT_SETTINGS.apiBaseUrl, initialized);
+  renderFieldValue(els.chatPath, settings.chatPath, DEFAULT_SETTINGS.chatPath, initialized);
+  renderFieldValue(els.modelName, settings.modelName, DEFAULT_SETTINGS.modelName, initialized);
+  renderFieldValue(
     els.apiKeyHeader,
     settings.apiKeyHeader,
-    DEFAULT_SETTINGS.apiKeyHeader
+    DEFAULT_SETTINGS.apiKeyHeader,
+    initialized
   );
-  setTextFieldValue(
+  renderFieldValue(
     els.apiKeyPrefix,
     settings.apiKeyPrefix,
-    DEFAULT_SETTINGS.apiKeyPrefix
+    DEFAULT_SETTINGS.apiKeyPrefix,
+    initialized
   );
-  setTextFieldValue(els.apiKey, settings.apiKey, API_KEY_PLACEHOLDER);
-  setTextFieldValue(
+  renderFieldValue(els.apiKey, settings.apiKey, API_KEY_PLACEHOLDER, initialized);
+  renderFieldValue(
     els.extraHeaders,
     settings.extraHeaders,
-    DEFAULT_SETTINGS.extraHeaders
+    DEFAULT_SETTINGS.extraHeaders,
+    initialized
   );
-  setTextFieldValue(
+  renderFieldValue(
     els.timeoutMs,
     settings.timeoutMs,
-    DEFAULT_SETTINGS.timeoutMs
+    DEFAULT_SETTINGS.timeoutMs,
+    initialized
   );
 
   els.defaultTargetLanguage.value =
     settings.defaultTargetLanguage ?? DEFAULT_SETTINGS.defaultTargetLanguage;
 
-  setNumericFieldValue(
+  renderFieldValue(
     els.temperature,
     settings.temperature,
-    NUMERIC_DEFAULTS.temperature
+    NUMERIC_DEFAULTS.temperature,
+    initialized
   );
-  setNumericFieldValue(els.topK, settings.topK, NUMERIC_DEFAULTS.topK);
-  setNumericFieldValue(els.topP, settings.topP, NUMERIC_DEFAULTS.topP);
-  setNumericFieldValue(
+  renderFieldValue(els.topK, settings.topK, NUMERIC_DEFAULTS.topK, initialized);
+  renderFieldValue(els.topP, settings.topP, NUMERIC_DEFAULTS.topP, initialized);
+  renderFieldValue(
     els.maxTokens,
     settings.maxTokens,
-    NUMERIC_DEFAULTS.maxTokens
+    NUMERIC_DEFAULTS.maxTokens,
+    initialized
   );
 
   bindDefaultFillBehavior(els.apiBaseUrl, DEFAULT_SETTINGS.apiBaseUrl);
@@ -173,60 +167,61 @@ async function loadSettings() {
 
 function getSettingsFromUI() {
   return {
-    apiBaseUrl: els.apiBaseUrl.value.trim() || DEFAULT_SETTINGS.apiBaseUrl,
-    chatPath: els.chatPath.value.trim() || DEFAULT_SETTINGS.chatPath,
-    modelName: els.modelName.value.trim() || DEFAULT_SETTINGS.modelName,
+    apiBaseUrl: normalizeTextValue(els.apiBaseUrl.value),
+    chatPath: normalizeTextValue(els.chatPath.value),
+    modelName: normalizeTextValue(els.modelName.value),
     defaultTargetLanguage: els.defaultTargetLanguage.value,
-    apiKey: els.apiKey.value.trim(),
-    apiKeyHeader: els.apiKeyHeader.value.trim() || DEFAULT_SETTINGS.apiKeyHeader,
-    apiKeyPrefix: els.apiKeyPrefix.value.trim(),
-    temperature: toNumberValue(els.temperature.value, NUMERIC_DEFAULTS.temperature),
-    topK: toNumberValue(els.topK.value, NUMERIC_DEFAULTS.topK),
-    topP: toNumberValue(els.topP.value, NUMERIC_DEFAULTS.topP),
-    maxTokens: toNumberValue(els.maxTokens.value, NUMERIC_DEFAULTS.maxTokens),
-    timeoutMs: toNumberValue(els.timeoutMs.value, DEFAULT_SETTINGS.timeoutMs),
-    extraHeaders: els.extraHeaders.value.trim() || "{}",
+    apiKey: normalizeTextValue(els.apiKey.value),
+    apiKeyHeader: normalizeTextValue(els.apiKeyHeader.value),
+    apiKeyPrefix: normalizeTextValue(els.apiKeyPrefix.value),
+    temperature: normalizeTextValue(els.temperature.value),
+    topK: normalizeTextValue(els.topK.value),
+    topP: normalizeTextValue(els.topP.value),
+    maxTokens: normalizeTextValue(els.maxTokens.value),
+    timeoutMs: normalizeTextValue(els.timeoutMs.value),
+    extraHeaders: normalizeTextValue(els.extraHeaders.value),
   };
 }
 
 function validateSettings(settings) {
-  if (!settings.apiBaseUrl) {
-    throw new Error("API Base URL 不能为空");
-  }
-  if (!settings.chatPath) {
-    throw new Error("Chat Completions Path 不能为空");
-  }
-  if (!settings.modelName) {
-    throw new Error("Model Name 不能为空");
+  // 空白代表“使用默认值”，所以允许直接保存。
+  // 只有用户真的输入了内容，才校验格式和范围。
+  if (settings.temperature !== "") {
+    const n = Number(settings.temperature);
+    if (Number.isNaN(n)) throw new Error("Temperature 必须是数字");
+    if (n < 0 || n > 1) throw new Error("Temperature 必须在 0 到 1 之间");
   }
 
-  if (Number.isNaN(settings.temperature)) {
-    throw new Error("Temperature 必须是数字");
-  }
-  if (Number.isNaN(settings.topK)) {
-    throw new Error("Top K 必须是数字");
-  }
-  if (Number.isNaN(settings.topP)) {
-    throw new Error("Top P 必须是数字");
-  }
-  if (Number.isNaN(settings.maxTokens)) {
-    throw new Error("Max Tokens 必须是数字");
-  }
-  if (Number.isNaN(settings.timeoutMs)) {
-    throw new Error("Request Timeout 必须是数字");
+  if (settings.topK !== "") {
+    const n = Number(settings.topK);
+    if (Number.isNaN(n)) throw new Error("Top K 必须是数字");
+    if (n < 0) throw new Error("Top K 不能小于 0");
   }
 
-  if (settings.temperature < 0 || settings.temperature > 1) {
-    throw new Error("Temperature 必须在 0 到 1 之间");
-  }
-  if (settings.topP < 0 || settings.topP > 1) {
-    throw new Error("Top P 必须在 0 到 1 之间");
+  if (settings.topP !== "") {
+    const n = Number(settings.topP);
+    if (Number.isNaN(n)) throw new Error("Top P 必须是数字");
+    if (n < 0 || n > 1) throw new Error("Top P 必须在 0 到 1 之间");
   }
 
-  try {
-    JSON.parse(settings.extraHeaders || "{}");
-  } catch {
-    throw new Error("Additional Headers 必须是合法 JSON");
+  if (settings.maxTokens !== "") {
+    const n = Number(settings.maxTokens);
+    if (Number.isNaN(n)) throw new Error("Max Tokens 必须是数字");
+    if (n < 1) throw new Error("Max Tokens 不能小于 1");
+  }
+
+  if (settings.timeoutMs !== "") {
+    const n = Number(settings.timeoutMs);
+    if (Number.isNaN(n)) throw new Error("Request Timeout 必须是数字");
+    if (n < 1000) throw new Error("Request Timeout 不能小于 1000");
+  }
+
+  if (settings.extraHeaders !== "") {
+    try {
+      JSON.parse(settings.extraHeaders);
+    } catch {
+      throw new Error("Additional Headers 必须是合法 JSON");
+    }
   }
 }
 
@@ -235,7 +230,11 @@ async function saveSettings() {
     const settings = getSettingsFromUI();
     validateSettings(settings);
 
-    await chrome.storage.sync.set(settings);
+    await chrome.storage.sync.set({
+      ...settings,
+      [SETTINGS_UI_INITIALIZED_KEY]: true,
+    });
+
     setStatus("Settings saved");
     setTimeout(() => setStatus(""), 1200);
   } catch (err) {

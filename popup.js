@@ -147,8 +147,35 @@ function populateLangSelects(defaultTarget) {
   targetLang.value = defaultTarget || "Chinese";
 }
 
+function normalizeSettings(raw = {}) {
+  const textOrDefault = (value, fallback) => {
+    const normalized = String(value ?? "").trim();
+    return normalized === "" ? fallback : normalized;
+  };
+
+  return {
+    apiBaseUrl: textOrDefault(raw.apiBaseUrl, DEFAULT_SETTINGS.apiBaseUrl),
+    chatPath: textOrDefault(raw.chatPath, DEFAULT_SETTINGS.chatPath),
+    modelName: textOrDefault(raw.modelName, DEFAULT_SETTINGS.modelName),
+    apiKey: String(raw.apiKey ?? "").trim(),
+    apiKeyHeader: textOrDefault(raw.apiKeyHeader, DEFAULT_SETTINGS.apiKeyHeader),
+    apiKeyPrefix: textOrDefault(raw.apiKeyPrefix, DEFAULT_SETTINGS.apiKeyPrefix),
+    temperature: textOrDefault(raw.temperature, DEFAULT_SETTINGS.temperature),
+    topK: textOrDefault(raw.topK, DEFAULT_SETTINGS.topK),
+    topP: textOrDefault(raw.topP, DEFAULT_SETTINGS.topP),
+    maxTokens: textOrDefault(raw.maxTokens, DEFAULT_SETTINGS.maxTokens),
+    timeoutMs: textOrDefault(raw.timeoutMs, DEFAULT_SETTINGS.timeoutMs),
+    extraHeaders: textOrDefault(raw.extraHeaders, DEFAULT_SETTINGS.extraHeaders),
+    defaultTargetLanguage: textOrDefault(
+      raw.defaultTargetLanguage,
+      DEFAULT_SETTINGS.defaultTargetLanguage
+    ),
+  };
+}
+
 async function loadSettings() {
-  return await chrome.storage.sync.get(DEFAULT_SETTINGS);
+  const raw = await chrome.storage.sync.get(null);
+  return normalizeSettings(raw);
 }
 
 async function translateText(text, tgtLang) {
