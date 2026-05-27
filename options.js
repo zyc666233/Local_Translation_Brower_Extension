@@ -14,13 +14,6 @@ const DEFAULT_SETTINGS = {
   defaultTargetLanguage: "Chinese",
 };
 
-const NUMERIC_DEFAULTS = {
-  temperature: 0.7,
-  topK: 20,
-  topP: 0.6,
-  maxTokens: 4096,
-};
-
 const API_KEY_PLACEHOLDER = "sk-xxxx";
 const SETTINGS_UI_INITIALIZED_KEY = "__settingsUiInitialized";
 
@@ -139,15 +132,15 @@ async function loadSettings() {
   renderFieldValue(
     els.temperature,
     settings.temperature,
-    NUMERIC_DEFAULTS.temperature,
+    DEFAULT_SETTINGS.temperature,
     initialized
   );
-  renderFieldValue(els.topK, settings.topK, NUMERIC_DEFAULTS.topK, initialized);
-  renderFieldValue(els.topP, settings.topP, NUMERIC_DEFAULTS.topP, initialized);
+  renderFieldValue(els.topK, settings.topK, DEFAULT_SETTINGS.topK, initialized);
+  renderFieldValue(els.topP, settings.topP, DEFAULT_SETTINGS.topP, initialized);
   renderFieldValue(
     els.maxTokens,
     settings.maxTokens,
-    NUMERIC_DEFAULTS.maxTokens,
+    DEFAULT_SETTINGS.maxTokens,
     initialized
   );
 
@@ -159,10 +152,10 @@ async function loadSettings() {
   bindDefaultFillBehavior(els.apiKey, API_KEY_PLACEHOLDER);
   bindDefaultFillBehavior(els.timeoutMs, DEFAULT_SETTINGS.timeoutMs);
 
-  bindDefaultFillBehavior(els.temperature, NUMERIC_DEFAULTS.temperature);
-  bindDefaultFillBehavior(els.topK, NUMERIC_DEFAULTS.topK);
-  bindDefaultFillBehavior(els.topP, NUMERIC_DEFAULTS.topP);
-  bindDefaultFillBehavior(els.maxTokens, NUMERIC_DEFAULTS.maxTokens);
+  bindDefaultFillBehavior(els.temperature, DEFAULT_SETTINGS.temperature);
+  bindDefaultFillBehavior(els.topK, DEFAULT_SETTINGS.topK);
+  bindDefaultFillBehavior(els.topP, DEFAULT_SETTINGS.topP);
+  bindDefaultFillBehavior(els.maxTokens, DEFAULT_SETTINGS.maxTokens);
 }
 
 function getSettingsFromUI() {
