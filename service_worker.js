@@ -80,7 +80,7 @@ async function readCacheRecord(db, key) {
 
   const result = await requestToPromise(req);
 
-  await transactionDone(tx).catch(() => { });
+  await transactionDone(tx).catch(() => {});
 
   return result || null;
 }
@@ -117,7 +117,7 @@ async function readAllCacheRecords(db) {
 
   const result = await requestToPromise(req);
 
-  await transactionDone(tx).catch(() => { });
+  await transactionDone(tx).catch(() => {});
 
   return Array.isArray(result) ? result : [];
 }
@@ -149,7 +149,7 @@ async function pruneCacheIfNeeded(db, force = false) {
   if (
     !force &&
     now - lastCacheMaintenanceAt <
-    CACHE_MAINTENANCE_THROTTLE_MS
+      CACHE_MAINTENANCE_THROTTLE_MS
   ) {
     return;
   }
@@ -217,7 +217,7 @@ async function getCachedTranslation(
 
     if (!record?.translated) {
       await pruneCacheIfNeeded(db).catch(
-        () => { }
+        () => {}
       );
 
       return null;
@@ -227,11 +227,11 @@ async function getCachedTranslation(
 
     if (isRecordExpired(record, now)) {
       await deleteCacheKeys(db, [key]).catch(
-        () => { }
+        () => {}
       );
 
       await pruneCacheIfNeeded(db).catch(
-        () => { }
+        () => {}
       );
 
       return null;
@@ -240,10 +240,10 @@ async function getCachedTranslation(
     await touchCacheRecord(
       db,
       record
-    ).catch(() => { });
+    ).catch(() => {});
 
     await pruneCacheIfNeeded(db).catch(
-      () => { }
+      () => {}
     );
 
     return record.translated;
@@ -508,7 +508,7 @@ async function translateText({
   text,
   settings,
   targetLanguage:
-  explicitTargetLanguage,
+    explicitTargetLanguage,
   translationMode,
 }) {
   const input =
@@ -528,8 +528,8 @@ async function translateText({
     forcedChineseMode
       ? "Chinese"
       : explicitTargetLanguage ||
-      settings.defaultTargetLanguage ||
-      "Chinese";
+        settings.defaultTargetLanguage ||
+        "Chinese";
 
   if (
     forcedChineseMode &&
@@ -578,6 +578,17 @@ async function translateText({
 }
 
 /**
+ * Helpers
+ */
+function coerceNumber(value, fallback) {
+  const raw = String(value ?? "").trim();
+  if (raw === "") return fallback;
+
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+/**
  * OpenAI Compatible Request
  */
 async function requestOpenAICompatibleAPI({
@@ -587,8 +598,7 @@ async function requestOpenAICompatibleAPI({
   forcedChineseMode,
 }) {
   const headers = {
-    "Content-Type":
-      "application/json",
+    "Content-Type": "application/json",
   };
 
   /**
@@ -599,8 +609,8 @@ async function requestOpenAICompatibleAPI({
       settings.apiKeyHeader ||
       "Authorization"
     ] = settings.apiKeyPrefix
-        ? `${settings.apiKeyPrefix} ${settings.apiKey}`
-        : settings.apiKey;
+      ? `${settings.apiKeyPrefix} ${settings.apiKey}`
+      : settings.apiKey;
   }
 
   /**
@@ -640,17 +650,40 @@ async function requestOpenAICompatibleAPI({
     const systemPrompt =
       forcedChineseMode
         ? [
-          "你是一个网页翻译引擎。",
-          "目标语言固定为中文。",
-          "如果输入已经是中文则原样输出。",
-          "请忠实自然地翻译。",
-          "只输出翻译结果。",
-        ].join(" ")
+            "你是一个网页翻译引擎。",
+            "目标语言固定为中文。",
+            "如果输入已经是中文则原样输出。",
+            "请忠实自然地翻译。",
+            "只输出翻译结果。",
+          ].join(" ")
         : [
-          "You are a professional translation engine.",
-          `Translate the following text into ${targetLanguage}.`,
-          "Output ONLY the translated text.",
-        ].join(" ");
+            "You are a professional translation engine.",
+            `Translate the following text into ${targetLanguage}.`,
+            "Output ONLY the translated text.",
+          ].join(" ");
+
+    const temperature = coerceNumber(
+      settings.temperature,
+      DEFAULT_SETTINGS.temperature
+    );
+
+    const topK = coerceNumber(
+      settings.topK,
+      DEFAULT_SETTINGS.topK
+    );
+
+    const topP = coerceNumber(
+      settings.topP,
+      DEFAULT_SETTINGS.topP
+    );
+
+    const maxTokens = Math.max(
+      1,
+      coerceNumber(
+        settings.maxTokens,
+        DEFAULT_SETTINGS.maxTokens
+      )
+    );
 
     const resp = await fetch(
       `${base}${path}`,
@@ -670,12 +703,10 @@ async function requestOpenAICompatibleAPI({
               content: input,
             },
           ],
-          temperature:
-            settings.temperature,
-          top_k: settings.topK,
-          top_p: settings.topP,
-          max_tokens:
-            settings.maxTokens,
+          temperature,
+          top_k: topK,
+          top_p: topP,
+          max_tokens: maxTokens,
           stream: false,
         }),
       }

@@ -1,97 +1,121 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>设置</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body class="options-body">
+    <div class="container">
+      <div class="card">
+        <h1>大模型服务 API 设置</h1>
+        <p class="desc">配置兼容 OpenAI Chat Completions 格式的大模型接口。</p>
 
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Translator Settings</title>
-  <link rel="stylesheet" href="options.css" />
-</head>
-
-<body>
-  <div class="container">
-    <div class="card">
-      <h1>大模型服务 API 设置</h1>
-      <p class="desc">
-        配置兼容 OpenAI Chat Completions 格式的大模型接口。
-      </p>
-
-      <div class="field-group">
-        <label>API Base URL *</label>
-        <input id="apiBaseUrl" type="text" placeholder="https://api.openai.com/v1" />
-      </div>
-
-      <div class="field-group">
-        <label>Chat Completions Path *</label>
-        <input id="chatPath" type="text" placeholder="/chat/completions" />
-      </div>
-
-      <div class="field-group">
-        <label>Model Name *</label>
-        <input id="modelName" type="text" placeholder="gpt-4o-mini" />
-      </div>
-
-      <div class="field-group">
-        <label>API Key</label>
-        <input id="apiKey" type="password" placeholder="sk-xxxx" />
-      </div>
-
-      <div class="grid-2">
         <div class="field-group">
-          <label>Authorization Header Name</label>
-          <input id="apiKeyHeader" type="text" placeholder="Authorization" />
+          <label for="apiBaseUrl">API Base URL *</label>
+          <input id="apiBaseUrl" type="text" placeholder="http://localhost:1234/v1" />
         </div>
 
         <div class="field-group">
-          <label>Authorization Prefix</label>
-          <input id="apiKeyPrefix" type="text" placeholder="Bearer" />
-        </div>
-      </div>
-
-      <div class="grid-4">
-        <div class="field-group">
-          <label class="mini-label" for="temperature">Temperature</label>
-          <input id="temperature" type="number" step="0.1" min="0" max="2" />
+          <label for="chatPath">Chat Completions Path *</label>
+          <input id="chatPath" type="text" placeholder="/chat/completions" />
         </div>
 
         <div class="field-group">
-          <label class="mini-label" for="topK">Top K</label>
-          <input id="topK" type="number" min="0" />
+          <label for="modelName">Model Name *</label>
+          <input id="modelName" type="text" placeholder="hy-mt2-1.8b" />
         </div>
 
         <div class="field-group">
-          <label class="mini-label" for="topP">Top P</label>
-          <input id="topP" type="number" step="0.1" min="0" max="1" />
+          <label for="defaultTargetLanguage">Default Target Language</label>
+          <select id="defaultTargetLanguage">
+            <option value="Chinese">中文</option>
+            <option value="English">English</option>
+            <option value="French">Français</option>
+            <option value="German">Deutsch</option>
+            <option value="Japanese">日本語</option>
+            <option value="Korean">한국어</option>
+            <option value="Russian">Русский</option>
+          </select>
         </div>
 
         <div class="field-group">
-          <label class="mini-label" for="maxTokens">Max Tokens</label>
-          <input id="maxTokens" type="number" min="1" />
+          <label for="apiKey">API Key</label>
+          <input id="apiKey" type="text" placeholder="sk-xxxx" />
         </div>
-      </div>
 
-      <div class="field-group">
-        <label>Request Timeout (ms)</label>
-        <input id="timeoutMs" type="number" min="1000" />
-      </div>
+        <div class="grid-2">
+          <div class="field-group">
+            <label for="apiKeyHeader">Authorization Header Name</label>
+            <input id="apiKeyHeader" type="text" placeholder="Authorization" />
+          </div>
 
-      <div class="field-group">
-        <label>Additional Headers (JSON)</label>
-        <textarea id="extraHeaders" rows="5" placeholder='{
-  "X-Custom-Header": "demo"
-}'></textarea>
-      </div>
+          <div class="field-group">
+            <label for="apiKeyPrefix">Authorization Prefix</label>
+            <input id="apiKeyPrefix" type="text" placeholder="Bearer" />
+          </div>
+        </div>
 
-      <div class="actions">
-        <button id="saveBtn">保存设置</button>
-        <button id="testBtn" class="secondary">测试连接</button>
-      </div>
+        <div class="grid-4">
+          <div class="field-group compact">
+            <label class="mini-label" for="temperature">Temperature</label>
+            <input
+              id="temperature"
+              type="number"
+              step="0.01"
+              min="0"
+              max="1"
+              placeholder="0.7"
+            />
+          </div>
 
-      <div id="status" class="status"></div>
+          <div class="field-group compact">
+            <label class="mini-label" for="topK">Top K</label>
+            <input id="topK" type="number" min="0" placeholder="20" />
+          </div>
+
+          <div class="field-group compact">
+            <label class="mini-label" for="topP">Top P</label>
+            <input
+              id="topP"
+              type="number"
+              step="0.01"
+              min="0"
+              max="1"
+              placeholder="0.6"
+            />
+          </div>
+
+          <div class="field-group compact">
+            <label class="mini-label" for="maxTokens">Max Tokens</label>
+            <input id="maxTokens" type="number" min="1" placeholder="4096" />
+          </div>
+        </div>
+
+        <div class="field-group">
+          <label for="timeoutMs">Request Timeout (ms)</label>
+          <input id="timeoutMs" type="number" min="1000" placeholder="120000" />
+        </div>
+
+        <div class="field-group">
+          <label for="extraHeaders">Additional Headers (JSON)</label>
+          <textarea
+            id="extraHeaders"
+            rows="5"
+            placeholder='{\n  "X-Custom-Header": "demo"\n}'
+          ></textarea>
+        </div>
+
+        <div class="actions">
+          <button id="saveBtn">Save Settings</button>
+          <button id="testBtn" class="secondary" type="button">Test Connection</button>
+        </div>
+
+        <div id="status" class="status"></div>
+      </div>
     </div>
-  </div>
 
-  <script src="options.js"></script>
-</body>
-
+    <script src="options.js"></script>
+  </body>
 </html>

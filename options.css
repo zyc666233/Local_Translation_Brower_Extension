@@ -40,18 +40,23 @@ h1 {
   margin-bottom: 18px;
 }
 
+.field-group.compact {
+  margin-bottom: 0;
+}
+
 label {
   display: block;
   margin-bottom: 8px;
   font-weight: 600;
   font-size: 14px;
+  color: #111827;
 }
 
 .mini-label {
-  margin-bottom: 6px;
-  font-size: 13px;
-  font-weight: 500;
-  color: #374151;
+  margin-bottom: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #111827;
 }
 
 input,
@@ -64,6 +69,12 @@ select {
   font-size: 14px;
   background: #fff;
   color: #111827;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: #9ca3af;
+  opacity: 1;
 }
 
 textarea {
@@ -82,6 +93,10 @@ textarea {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
+}
+
+.grid-4 .field-group {
+  margin-bottom: 0;
 }
 
 .actions {

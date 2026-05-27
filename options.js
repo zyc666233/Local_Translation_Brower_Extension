@@ -1,18 +1,27 @@
 const DEFAULT_SETTINGS = {
-  apiBaseUrl: "https://api.openai.com/v1",
+  apiBaseUrl: "http://localhost:1234/v1",
   chatPath: "/chat/completions",
-  modelName: "gpt-4o-mini",
+  modelName: "hy-mt2-1.8b",
   apiKey: "",
   apiKeyHeader: "Authorization",
   apiKeyPrefix: "Bearer",
-  temperature: 0,
-  topK: 40,
-  topP: 0.9,
-  maxTokens: 2048,
+  temperature: 0.7,
+  topK: 20,
+  topP: 0.6,
+  maxTokens: 4096,
   timeoutMs: 120000,
   extraHeaders: "{}",
   defaultTargetLanguage: "Chinese",
 };
+
+const NUMERIC_DEFAULTS = {
+  temperature: 0.7,
+  topK: 20,
+  topP: 0.6,
+  maxTokens: 4096,
+};
+
+const API_KEY_PLACEHOLDER = "sk-xxxx";
 
 const els = {
   apiBaseUrl: document.getElementById("apiBaseUrl"),
@@ -39,56 +48,156 @@ function setStatus(text, isError = false) {
 }
 
 function toNumberValue(value, fallback) {
-  const n = Number(value);
+  const raw = String(value ?? "").trim();
+  if (raw === "") return fallback;
+
+  const n = Number(raw);
   return Number.isFinite(n) ? n : fallback;
+}
+
+function bindDefaultFillBehavior(inputEl, defaultValue) {
+  if (!inputEl) return;
+
+  inputEl.placeholder = String(defaultValue);
+
+  inputEl.addEventListener(
+    "keydown",
+    (event) => {
+      if (event.key !== "Tab") return;
+
+      const currentValue = String(inputEl.value || "").trim();
+      if (currentValue) return;
+
+      event.preventDefault();
+      event.stopImmediatePropagation();
+
+      inputEl.value = String(defaultValue);
+      inputEl.dispatchEvent(new Event("input", { bubbles: true }));
+
+      const len = inputEl.value.length;
+      try {
+        inputEl.setSelectionRange(len, len);
+      } catch {
+        // 某些 input 类型不支持 setSelectionRange，忽略
+      }
+    },
+    true
+  );
+}
+
+function setTextFieldValue(inputEl, savedValue, defaultValue) {
+  if (!inputEl) return;
+
+  inputEl.placeholder = String(defaultValue);
+
+  const normalized =
+    savedValue === undefined || savedValue === null
+      ? ""
+      : String(savedValue).trim();
+
+  inputEl.value =
+    normalized && normalized !== String(defaultValue) ? normalized : "";
+}
+
+function setNumericFieldValue(inputEl, savedValue, defaultValue) {
+  if (!inputEl) return;
+
+  inputEl.placeholder = String(defaultValue);
+
+  const normalized =
+    savedValue === undefined || savedValue === null
+      ? ""
+      : String(savedValue).trim();
+
+  inputEl.value =
+    normalized && normalized !== String(defaultValue) ? normalized : "";
 }
 
 async function loadSettings() {
   const settings = await chrome.storage.sync.get(DEFAULT_SETTINGS);
 
-  els.apiBaseUrl.value = settings.apiBaseUrl ?? DEFAULT_SETTINGS.apiBaseUrl;
-  els.chatPath.value = settings.chatPath ?? DEFAULT_SETTINGS.chatPath;
-  els.modelName.value = settings.modelName ?? DEFAULT_SETTINGS.modelName;
+  setTextFieldValue(els.apiBaseUrl, settings.apiBaseUrl, DEFAULT_SETTINGS.apiBaseUrl);
+  setTextFieldValue(els.chatPath, settings.chatPath, DEFAULT_SETTINGS.chatPath);
+  setTextFieldValue(els.modelName, settings.modelName, DEFAULT_SETTINGS.modelName);
+  setTextFieldValue(
+    els.apiKeyHeader,
+    settings.apiKeyHeader,
+    DEFAULT_SETTINGS.apiKeyHeader
+  );
+  setTextFieldValue(
+    els.apiKeyPrefix,
+    settings.apiKeyPrefix,
+    DEFAULT_SETTINGS.apiKeyPrefix
+  );
+  setTextFieldValue(els.apiKey, settings.apiKey, API_KEY_PLACEHOLDER);
+  setTextFieldValue(
+    els.extraHeaders,
+    settings.extraHeaders,
+    DEFAULT_SETTINGS.extraHeaders
+  );
+  setTextFieldValue(
+    els.timeoutMs,
+    settings.timeoutMs,
+    DEFAULT_SETTINGS.timeoutMs
+  );
+
   els.defaultTargetLanguage.value =
     settings.defaultTargetLanguage ?? DEFAULT_SETTINGS.defaultTargetLanguage;
-  els.apiKey.value = settings.apiKey ?? "";
-  els.apiKeyHeader.value = settings.apiKeyHeader ?? DEFAULT_SETTINGS.apiKeyHeader;
-  els.apiKeyPrefix.value = settings.apiKeyPrefix ?? DEFAULT_SETTINGS.apiKeyPrefix;
-  els.temperature.value = settings.temperature ?? DEFAULT_SETTINGS.temperature;
-  els.topK.value = settings.topK ?? DEFAULT_SETTINGS.topK;
-  els.topP.value = settings.topP ?? DEFAULT_SETTINGS.topP;
-  els.maxTokens.value = settings.maxTokens ?? DEFAULT_SETTINGS.maxTokens;
-  els.timeoutMs.value = settings.timeoutMs ?? DEFAULT_SETTINGS.timeoutMs;
-  els.extraHeaders.value = settings.extraHeaders ?? DEFAULT_SETTINGS.extraHeaders;
+
+  setNumericFieldValue(
+    els.temperature,
+    settings.temperature,
+    NUMERIC_DEFAULTS.temperature
+  );
+  setNumericFieldValue(els.topK, settings.topK, NUMERIC_DEFAULTS.topK);
+  setNumericFieldValue(els.topP, settings.topP, NUMERIC_DEFAULTS.topP);
+  setNumericFieldValue(
+    els.maxTokens,
+    settings.maxTokens,
+    NUMERIC_DEFAULTS.maxTokens
+  );
+
+  bindDefaultFillBehavior(els.apiBaseUrl, DEFAULT_SETTINGS.apiBaseUrl);
+  bindDefaultFillBehavior(els.chatPath, DEFAULT_SETTINGS.chatPath);
+  bindDefaultFillBehavior(els.modelName, DEFAULT_SETTINGS.modelName);
+  bindDefaultFillBehavior(els.apiKeyHeader, DEFAULT_SETTINGS.apiKeyHeader);
+  bindDefaultFillBehavior(els.apiKeyPrefix, DEFAULT_SETTINGS.apiKeyPrefix);
+  bindDefaultFillBehavior(els.apiKey, API_KEY_PLACEHOLDER);
+  bindDefaultFillBehavior(els.timeoutMs, DEFAULT_SETTINGS.timeoutMs);
+
+  bindDefaultFillBehavior(els.temperature, NUMERIC_DEFAULTS.temperature);
+  bindDefaultFillBehavior(els.topK, NUMERIC_DEFAULTS.topK);
+  bindDefaultFillBehavior(els.topP, NUMERIC_DEFAULTS.topP);
+  bindDefaultFillBehavior(els.maxTokens, NUMERIC_DEFAULTS.maxTokens);
 }
 
 function getSettingsFromUI() {
   return {
-    apiBaseUrl: els.apiBaseUrl.value.trim(),
-    chatPath: els.chatPath.value.trim() || "/chat/completions",
-    modelName: els.modelName.value.trim(),
+    apiBaseUrl: els.apiBaseUrl.value.trim() || DEFAULT_SETTINGS.apiBaseUrl,
+    chatPath: els.chatPath.value.trim() || DEFAULT_SETTINGS.chatPath,
+    modelName: els.modelName.value.trim() || DEFAULT_SETTINGS.modelName,
     defaultTargetLanguage: els.defaultTargetLanguage.value,
     apiKey: els.apiKey.value.trim(),
-    apiKeyHeader: els.apiKeyHeader.value.trim() || "Authorization",
+    apiKeyHeader: els.apiKeyHeader.value.trim() || DEFAULT_SETTINGS.apiKeyHeader,
     apiKeyPrefix: els.apiKeyPrefix.value.trim(),
-    temperature: toNumberValue(els.temperature.value, 0),
-    topK: toNumberValue(els.topK.value, 40),
-    topP: toNumberValue(els.topP.value, 0.9),
-    maxTokens: toNumberValue(els.maxTokens.value, 2048),
-    timeoutMs: toNumberValue(els.timeoutMs.value, 120000),
+    temperature: toNumberValue(els.temperature.value, NUMERIC_DEFAULTS.temperature),
+    topK: toNumberValue(els.topK.value, NUMERIC_DEFAULTS.topK),
+    topP: toNumberValue(els.topP.value, NUMERIC_DEFAULTS.topP),
+    maxTokens: toNumberValue(els.maxTokens.value, NUMERIC_DEFAULTS.maxTokens),
+    timeoutMs: toNumberValue(els.timeoutMs.value, DEFAULT_SETTINGS.timeoutMs),
     extraHeaders: els.extraHeaders.value.trim() || "{}",
   };
 }
 
 function validateSettings(settings) {
   if (!settings.apiBaseUrl) {
-    throw new Error("接口基础地址不能为空");
+    throw new Error("API Base URL 不能为空");
   }
   if (!settings.chatPath) {
-    throw new Error("Chat Completions 路径不能为空");
+    throw new Error("Chat Completions Path 不能为空");
   }
   if (!settings.modelName) {
-    throw new Error("模型名称不能为空");
+    throw new Error("Model Name 不能为空");
   }
 
   if (Number.isNaN(settings.temperature)) {
@@ -104,13 +213,20 @@ function validateSettings(settings) {
     throw new Error("Max Tokens 必须是数字");
   }
   if (Number.isNaN(settings.timeoutMs)) {
-    throw new Error("请求超时必须是数字");
+    throw new Error("Request Timeout 必须是数字");
+  }
+
+  if (settings.temperature < 0 || settings.temperature > 1) {
+    throw new Error("Temperature 必须在 0 到 1 之间");
+  }
+  if (settings.topP < 0 || settings.topP > 1) {
+    throw new Error("Top P 必须在 0 到 1 之间");
   }
 
   try {
     JSON.parse(settings.extraHeaders || "{}");
   } catch {
-    throw new Error("额外请求头必须是合法 JSON");
+    throw new Error("Additional Headers 必须是合法 JSON");
   }
 }
 
@@ -120,7 +236,7 @@ async function saveSettings() {
     validateSettings(settings);
 
     await chrome.storage.sync.set(settings);
-    setStatus("设置已保存");
+    setStatus("Settings saved");
     setTimeout(() => setStatus(""), 1200);
   } catch (err) {
     setStatus(err?.message || String(err), true);
@@ -132,7 +248,7 @@ async function testConnection() {
     const settings = getSettingsFromUI();
     validateSettings(settings);
 
-    setStatus("正在测试连接...");
+    setStatus("Testing connection...");
 
     const resp = await chrome.runtime.sendMessage({
       type: "TEST_OPENAI_API",
@@ -140,10 +256,10 @@ async function testConnection() {
     });
 
     if (!resp?.ok) {
-      throw new Error(resp?.error || "连接失败");
+      throw new Error(resp?.error || "Connection failed");
     }
 
-    setStatus("连接成功");
+    setStatus("Connection successful");
     setTimeout(() => setStatus(""), 1200);
   } catch (err) {
     setStatus(err?.message || String(err), true);
