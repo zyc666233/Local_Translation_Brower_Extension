@@ -542,12 +542,10 @@ function buildChatBody({
     reasoning: {
       enabled: false,
     },
-    extra_body: {
-      thinking: {
-        type: "disabled"
-      }
-    }
-    // enable_thinking: false,
+    thinking: {
+      type: "disabled"
+    },
+    enable_thinking: false,
     // thinking: false,
   };
 }
@@ -582,6 +580,7 @@ async function requestOpenAICompatibleAPI({
       forcedChineseMode,
       purpose,
     });
+    console.log(body)
     const resp = await fetch(`${base}${path}`, {
       method: "POST",
       headers,
@@ -598,9 +597,8 @@ async function requestOpenAICompatibleAPI({
     }
 
     const data = await resp.json();
+    console.log(data)
     const content = data?.choices?.[0]?.message?.content;
-
-
 
     if (typeof content !== "string" || !content.trim()) {
       throw new Error(`连接测试失败：模型接口返回为空或格式不正确 ${content}`);
