@@ -546,7 +546,6 @@ function buildChatBody({
       type: "disabled"
     },
     enable_thinking: false,
-    // thinking: false,
   };
 }
 
