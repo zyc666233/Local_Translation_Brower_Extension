@@ -58,73 +58,6 @@ function clamp01(value, fallback) {
   return n;
 }
 
-function buildRequestUrl(settings) {
-  const base = String(settings.apiBaseUrl || "").trim().replace(/\/$/, "");
-  const path = String(settings.chatPath || "").trim().startsWith("/")
-    ? String(settings.chatPath || "").trim()
-    : `/${String(settings.chatPath || "").trim()}`;
-
-  return `${base}${path}`;
-}
-
-function buildRequestHeaders(settings) {
-  const headers = {
-    "Content-Type": "application/json",
-  };
-
-  if (settings.apiKey) {
-    headers[settings.apiKeyHeader || "Authorization"] = settings.apiKeyPrefix
-      ? `${settings.apiKeyPrefix} ${settings.apiKey}`
-      : settings.apiKey;
-  }
-
-  try {
-    const extraHeaders = JSON.parse(settings.extraHeaders || "{}");
-    if (extraHeaders && typeof extraHeaders === "object" && !Array.isArray(extraHeaders)) {
-      Object.assign(headers, extraHeaders);
-    }
-  } catch {
-    // 忽略非法 JSON，测试/翻译时由保存页校验
-  }
-
-  return headers;
-}
-
-function buildChatBody(settings, text, targetLabel) {
-  const temperature = clamp01(settings.temperature, DEFAULT_SETTINGS.temperature);
-  const topP = clamp01(settings.topP, DEFAULT_SETTINGS.topP);
-  const topK = toNumberValue(settings.topK, DEFAULT_SETTINGS.topK);
-  const maxTokens = Math.max(1, toNumberValue(settings.maxTokens, DEFAULT_SETTINGS.maxTokens));
-
-  const prompt = [
-    "You are a professional translation engine.",
-    `Translate the following text into ${targetLabel}.`,
-    "Translate faithfully and naturally. Preserve meaning, tone, punctuation, formatting, HTML tags, and placeholders.",
-    "Output ONLY the translated text, no extra commentary.",
-  ].join("\n");
-
-  return {
-    model: settings.modelName,
-    messages: [
-      { role: "system", content: prompt },
-      { role: "user", content: text },
-    ],
-    temperature,
-    top_k: topK,
-    top_p: topP,
-    max_tokens: maxTokens,
-    stream: false,
-    // 关闭思考模式，兼容多种 OpenAI-like 实现
-    reasoning: {
-      enabled: false,
-    },
-    thinking: {
-      type: "disabled"
-    },
-    enable_thinking: false,
-  };
-}
-
 function populateLangSelects(defaultTarget) {
   sourceLang.innerHTML = "";
   targetLang.innerHTML = "";
@@ -178,9 +111,20 @@ async function loadSettings() {
   return normalizeSettings(raw);
 }
 
-async function translateText(text, tgtLang) {
-  const settings = await loadSettings();
+function sendRuntimeMessage(message) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(message, (response) => {
+      const lastError = chrome.runtime.lastError;
+      if (lastError) {
+        reject(new Error(lastError.message));
+        return;
+      }
+      resolve(response);
+    });
+  });
+}
 
+async function translateText(text, tgtLang) {
   const detectedLang = LangDetect.detect(text);
   const tgtLabel = langLabel(tgtLang);
 
@@ -192,33 +136,22 @@ async function translateText(text, tgtLang) {
     };
   }
 
-  const controller = new AbortController();
-  const timeoutMs = toNumberValue(settings.timeoutMs, DEFAULT_SETTINGS.timeoutMs);
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const resp = await sendRuntimeMessage({
+    type: "TRANSLATE_TEXT",
+    text,
+    targetLanguage: tgtLang,
+    translationMode: "popup",
+  });
 
-  try {
-    const resp = await fetch(buildRequestUrl(settings), {
-      method: "POST",
-      headers: buildRequestHeaders(settings),
-      signal: controller.signal,
-      body: JSON.stringify(buildChatBody(settings, text, tgtLabel)),
-    });
-
-    if (!resp.ok) {
-      throw new Error(await resp.text());
-    }
-
-    const data = await resp.json();
-    const translated = data?.choices?.[0]?.message?.content?.trim() || text;
-
-    return {
-      detectedLang: detectedLang ? LangDetect.getNativeName(detectedLang) : "",
-      translatedText: translated,
-      sameLanguage: false,
-    };
-  } finally {
-    clearTimeout(timer);
+  if (!resp?.ok) {
+    throw new Error(resp?.error || "翻译失败");
   }
+
+  return {
+    detectedLang: detectedLang ? LangDetect.getNativeName(detectedLang) : "",
+    translatedText: resp.translated || text,
+    sameLanguage: false,
+  };
 }
 
 async function init() {

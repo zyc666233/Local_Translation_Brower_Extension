@@ -16,6 +16,9 @@ const DEFAULT_SETTINGS = {
   extraHeaders: "{}",
 
   defaultTargetLanguage: "Chinese",
+
+  // 新增：当前翻译引擎标识，缓存 key 会用到
+  translationProvider: "llm",
 };
 
 const CACHE_MAX_ENTRIES = 500;
@@ -55,8 +58,14 @@ function initDB() {
   });
 }
 
-function getCacheKey(text, targetLanguage) {
-  return `${text}|${targetLanguage}`;
+function getTranslationEngineId(settings) {
+  return String(settings?.translationProvider || DEFAULT_SETTINGS.translationProvider || "llm")
+    .trim() || "llm";
+}
+
+function getCacheKey(text, targetLanguage, settings) {
+  const engineId = getTranslationEngineId(settings);
+  return `${engineId}|${targetLanguage}|${text}`;
 }
 
 function requestToPromise(req) {
@@ -177,26 +186,26 @@ async function pruneCacheIfNeeded(db, force = false) {
   await deleteCacheKeys(db, keysToDelete);
 }
 
-async function getCachedTranslation(text, targetLanguage) {
+async function getCachedTranslation(text, targetLanguage, settings) {
   try {
-    const key = getCacheKey(text, targetLanguage);
+    const key = getCacheKey(text, targetLanguage, settings);
     const db = await initDB();
     const record = await readCacheRecord(db, key);
 
     if (!record?.translated) {
-      await pruneCacheIfNeeded(db).catch(() => { });
+      await pruneCacheIfNeeded(db).catch(() => {});
       return null;
     }
 
     const now = Date.now();
     if (isRecordExpired(record, now)) {
-      await deleteCacheKeys(db, [key]).catch(() => { });
-      await pruneCacheIfNeeded(db).catch(() => { });
+      await deleteCacheKeys(db, [key]).catch(() => {});
+      await pruneCacheIfNeeded(db).catch(() => {});
       return null;
     }
 
-    await touchCacheRecord(db, record).catch(() => { });
-    await pruneCacheIfNeeded(db).catch(() => { });
+    await touchCacheRecord(db, record).catch(() => {});
+    await pruneCacheIfNeeded(db).catch(() => {});
 
     return record.translated;
   } catch {
@@ -204,9 +213,9 @@ async function getCachedTranslation(text, targetLanguage) {
   }
 }
 
-async function setCachedTranslation(text, targetLanguage, translated) {
+async function setCachedTranslation(text, targetLanguage, translated, settings) {
   try {
-    const key = getCacheKey(text, targetLanguage);
+    const key = getCacheKey(text, targetLanguage, settings);
     const db = await initDB();
     const now = Date.now();
 
@@ -249,6 +258,10 @@ function normalizeSettings(raw = {}) {
     defaultTargetLanguage: textOrDefault(
       raw.defaultTargetLanguage,
       DEFAULT_SETTINGS.defaultTargetLanguage
+    ),
+    translationProvider: textOrDefault(
+      raw.translationProvider,
+      DEFAULT_SETTINGS.translationProvider
     ),
   };
 }
@@ -436,7 +449,7 @@ async function translateText({
     };
   }
 
-  const cached = await getCachedTranslation(input, targetLanguage);
+  const cached = await getCachedTranslation(input, targetLanguage, settings);
   if (cached) {
     return {
       translated: cached,
@@ -453,7 +466,7 @@ async function translateText({
     purpose: "translate",
   });
 
-  await setCachedTranslation(input, targetLanguage, translated);
+  await setCachedTranslation(input, targetLanguage, translated, settings);
 
   return {
     translated,
